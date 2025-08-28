@@ -256,6 +256,7 @@ Let's imagine we want to detect **boats**⛵ and **birds**🐦 in a custom datas
 
 We have prepared a toy script to create a custom dataset with coco images, for a **1-shot** setting.
 ```bash
+mkdir -p data/my_custom_dataset
 python scripts/make_custom_dataset.py
 ```
 This will create a custom dataset with the following folder structure:
