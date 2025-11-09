@@ -31,8 +31,10 @@
 
 <div align="center">
 
-# 🚀 No Time to Train!  
+# 🚀 No Time to Train  
+
 ### Training-Free Reference-Based Instance Segmentation  
+
 [![GitHub](https://img.shields.io/badge/%E2%80%8B-No%20Time%20To%20Train-black?logo=github)](https://github.com/miquel-espinosa/no-time-to-train)
 [![Website](https://img.shields.io/badge/🌐-Project%20Page-grey)](https://miquel-espinosa.github.io/no-time-to-train/)
 [![arXiv](https://img.shields.io/badge/arXiv-2507.02798-b31b1b)](https://arxiv.org/abs/2507.02798)
@@ -56,7 +58,7 @@
 ---
 
 > 🚨 **Update (22nd July 2025):** Instructions for custom datasets have been added!
-> 
+>
 > 🔔 **Update (16th July 2025):** Code has been updated with instructions!
 
 ---
@@ -86,13 +88,14 @@
   - [2. Post-process memory bank](#2-post-process-memory-bank)
 - [📚 Citation](#-citation)
 
-
 ## 🎯 Highlights
+
 - 💡 **Training-Free**: No fine-tuning, no prompt engineering—just a reference image.  
 - 🖼️ **Reference-Based**: Segment new objects using just a few examples.  
 - 🔥 **SOTA Performance**: Outperforms previous training-free approaches on COCO, PASCAL VOC, and Cross-Domain FSOD.
 
 **Links:**
+
 - 🧾 [**arXiv Paper**](https://arxiv.org/abs/2507.02798)  
 - 🌐 [**Project Website**](https://miquel-espinosa.github.io/no-time-to-train/)  
 - 📈 [**Papers with Code**](https://paperswithcode.com/paper/no-time-to-train-training-free-reference)
@@ -103,11 +106,9 @@
 
 ![cdfsod-results-final-comic-sans-min](https://github.com/user-attachments/assets/ab302c02-c080-4042-99fc-0e181ba8abb9)
 
-
 ## 🧠 Architecture
 
 ![training-free-architecture-comic-sans-min](https://github.com/user-attachments/assets/d84dd83a-505e-45a0-8ce3-98e1838017f9)
-
 
 ## 🛠️ Installation instructions
 
@@ -121,6 +122,7 @@ cd no-time-to-train
 ### 2. Create conda environment
 
 We will create a conda environment with the required packages.
+
 ```bash
 conda env create -f environment.yml
 conda activate no-time-to-train
@@ -129,6 +131,7 @@ conda activate no-time-to-train
 ### 3. Install SAM2 and DinoV2
 
 We will install SAM2 and DinoV2 from source.
+
 ```bash
 pip install -e .
 cd dinov2
@@ -139,6 +142,10 @@ cd ..
 ### 4. Download datasets
 
 Please download COCO dataset and place it in `data/coco`
+
+```bash
+python no_time_to_train/dataset/download_dataset.py
+```
 
 ### 5. Download SAM2 and DinoV2 checkpoints
 
@@ -153,7 +160,6 @@ cd dinov2
 wget https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_pretrain.pth
 cd ../..
 ```
-
 
 ## 📊 Inference code
 
@@ -224,13 +230,17 @@ python run_lightening.py test --config $CONFIG  \
 ```
 
 If you'd like to see inference results online (as they are computed), add the argument:
+
 ```bash
     --model.init_args.model_cfg.test.online_vis True
 ```
+
 To adjust the score threshold `score_thr` parameter, add the argument (for example, visualising all instances with score higher than `0.4`):
+
 ```bash
     --model.init_args.model_cfg.test.vis_thr 0.4
 ```
+
 Images will now be saved in `results_analysis/few_shot_classes/`. The image on the left shows the ground truth, the image on the right shows the segmented instances found by our training-free method.
 
 Note that in this example we are using the `few_shot_classes` split, thus, we should only expect to see segmented instances of the classes in this split (not all classes in COCO).
@@ -246,26 +256,31 @@ BBOX RESULTS:
 SEGM RESULTS:
   Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.342
 ```
+
 ---
 
 ## 🔍 Custom dataset
 
 We provide the instructions for running our pipeline on a custom dataset. Annotation format are always in COCO format.
 
-> **TLDR;** To directly see how to run full pipeline on *custom datasets*, find `scripts/matching_cdfsod_pipeline.sh` together with example scripts of CD-FSOD datasets (e.g. `scripts/dior_fish.sh`)
+> **TLDR;** To directly see how to run full pipeline on _custom datasets_, find `scripts/matching_cdfsod_pipeline.sh` together with example scripts of CD-FSOD datasets (e.g. `scripts/dior_fish.sh`)
 
 ### 0. Prepare a custom dataset ⛵🐦
 
 Let's imagine we want to detect **boats**⛵ and **birds**🐦 in a custom dataset. To use our method we will need:
-- At least 1 *annotated* reference image for each class (i.e. 1 reference image for boat and 1 reference image for bird)
+
+- At least 1 _annotated_ reference image for each class (i.e. 1 reference image for boat and 1 reference image for bird)
 - Multiple target images to find instances of our desired classes.
 
 We have prepared a toy script to create a custom dataset with coco images, for a **1-shot** setting.
+
 ```bash
 mkdir -p data/my_custom_dataset
 python scripts/make_custom_dataset.py
 ```
+
 This will create a custom dataset with the following folder structure:
+
 ```
 data/my_custom_dataset/
     ├── annotations/
@@ -285,7 +300,6 @@ data/my_custom_dataset/
 | 1-shot Reference Image for BIRD 🐦 | 1-shot Reference Image for BOAT ⛵ |
 |:---------------------------------:|:----------------------------------:|
 | <img src="https://github.com/user-attachments/assets/e59e580d-a7db-42ac-b386-892af211fc85" alt="bird_1" width="500"/> | <img src="https://github.com/user-attachments/assets/f94ee025-ae37-4a45-9c3e-0cfe8f8cd2bc" alt="boat_1" width="500"/> |
-
 
 ### 0.1 If only bbox annotations are available
 
@@ -309,11 +323,9 @@ python no_time_to_train/dataset/sam_bbox_to_segm_batch.py \
 
 Visualisation of the generated segmentation masks are saved in `data/my_custom_dataset/annotations/custom_references_with_SAM_segm/references_visualisations/`.
 
-
 | 1-shot Reference Image for BIRD 🐦 (automatically segmented with SAM) | 1-shot Reference Image for BOAT ⛵ (automatically segmented with SAM) |
 |:---------------------------------:|:----------------------------------:|
 | <img src="https://github.com/user-attachments/assets/65d38dc4-1454-43cd-9600-e8efc67b3a82" alt="bird_1_with_SAM_segm" width="500"/> | <img src="https://github.com/user-attachments/assets/43a558ad-50ca-4715-8285-9aa3268843c6" alt="boat_1_with_SAM_segm" width="500"/> |
-
 
 ### 0.2 Convert coco annotations to pickle file
 
@@ -340,6 +352,7 @@ mkdir -p $PATH_TO_SAVE_CKPTS
 ```
 
 Run step 1:
+
 ```bash
 python run_lightening.py test --config $YAML_PATH \
     --model.test_mode fill_memory \
@@ -373,6 +386,7 @@ python run_lightening.py test --config $YAML_PATH \
 If `ONLINE_VIS` is set to True, prediction results will be saved in `results_analysis/my_custom_dataset/` and displayed as they are computed. NOTE that running with online visualisation is much slower.
 
 Feel free to change the score threshold `VIS_THR` to see more or less segmented instances.
+
 ```bash
 ONLINE_VIS=True
 VIS_THR=0.4
@@ -405,7 +419,7 @@ SEGM RESULTS:
 
 Visual results are saved in `results_analysis/my_custom_dataset/`. Note that our method works for false negatives, that is, images that do not contain any instances of the desired classes.
 
-*Click images to enlarge ⬇️*
+_Click images to enlarge ⬇️_
 
 | Target image with boats ⛵ (left GT, right predictions) | Target image with birds 🐦 (left GT, right predictions) |
 |:----------------------:|:----------------------:|
@@ -414,7 +428,6 @@ Visual results are saved in `results_analysis/my_custom_dataset/`. Note that our
 | Target image with boats and birds ⛵🐦 (left GT, right predictions) | Target image without boats or birds 🚫 (left GT, right predictions) |
 |:---------------------------------:|:----------------------------------:|
 | ![000000517410](https://github.com/user-attachments/assets/9849b227-7f43-43d7-81ea-58010a623ad5) | ![000000460598](https://github.com/user-attachments/assets/7587700c-e09d-4cf6-8590-3df129c2568e) |
-
 
 ## 📚 Citation
 
