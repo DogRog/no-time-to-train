@@ -27,10 +27,12 @@ import dinov2.dinov2.utils.utils as dinov2_utils
 
 from no_time_to_train.models.matching_baseline_utils import SAM2AutomaticMaskGenerator_MatchingBaseline
 from no_time_to_train.models.model_utils import concat_all_gather
+from no_time_to_train.models.dinov3_utils import get_dinov3_model, load_pretrained_weights as load_dinov3_weights, DINOV3_CONFIGS
 from no_time_to_train.utils import print_dict
 
 import time
 
+# DINOv2 configurations
 encoder_predefined_cfgs = {
     "dinov2_large": dict(
         model_size="vit_large",
@@ -43,6 +45,9 @@ encoder_predefined_cfgs = {
         feat_dim=1024
     )
 }
+
+# Add DINOv3 configurations
+encoder_predefined_cfgs.update(DINOV3_CONFIGS)
 
 
 class Sam2MatchingBaseline(nn.Module):
@@ -72,8 +77,18 @@ class Sam2MatchingBaseline(nn.Module):
         self.encoder_dim = encoder_args.pop("feat_dim")
 
         self.encoder_transform = Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-        self.encoder = dinov2_vit.__dict__[encoder_args.pop("model_size")](**encoder_args)
-        dinov2_utils.load_pretrained_weights(self.encoder, encoder_ckpt_path, "teacher")
+        
+        # Initialize encoder based on model type (DINOv2 or DINOv3)
+        if encoder_name.startswith("dinov3"):
+            # DINOv3 model
+            self.encoder = get_dinov3_model(encoder_args.pop("model_size"), **encoder_args)
+            load_dinov3_weights(self.encoder, encoder_ckpt_path, "teacher")
+            self.encoder_type = "dinov3"
+        else:
+            # DINOv2 model
+            self.encoder = dinov2_vit.__dict__[encoder_args.pop("model_size")](**encoder_args)
+            dinov2_utils.load_pretrained_weights(self.encoder, encoder_ckpt_path, "teacher")
+            self.encoder_type = "dinov2"
 
         self.sam_amg.predictor.model.eval()
         self.encoder.eval()
@@ -145,7 +160,28 @@ class Sam2MatchingBaseline(nn.Module):
 
         B = imgs.shape[0]
         imgs = self.encoder_transform(imgs)
-        feats = self.encoder.forward_features(imgs)["x_prenorm"][:, 1:]
+        
+        # Handle both DINOv2 and DINOv3 forward passes
+        if self.encoder_type == "dinov3":
+            # DINOv3 uses forward_features and returns a dict with 'x_norm_patchtokens'
+            output = self.encoder.forward_features(imgs)
+            if isinstance(output, dict):
+                # Try different keys that DINOv3 might use
+                if 'x_norm_patchtokens' in output:
+                    feats = output['x_norm_patchtokens']
+                elif 'x_prenorm' in output:
+                    feats = output['x_prenorm'][:, 1:]  # Remove CLS token
+                elif 'x_norm' in output:
+                    feats = output['x_norm'][:, 1:]  # Remove CLS token
+                else:
+                    raise ValueError(f"Unknown DINOv3 output format. Keys: {output.keys()}")
+            else:
+                # If it's a tensor, assume it includes CLS token
+                feats = output[:, 1:]
+        else:
+            # DINOv2 uses forward_features and returns a dict with 'x_prenorm'
+            feats = self.encoder.forward_features(imgs)["x_prenorm"][:, 1:]
+        
         if normalize:
             feats = F.normalize(feats, dim=-1, p=2)
         feats = feats.reshape(B, -1, self.encoder_dim)

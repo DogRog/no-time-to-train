@@ -28,6 +28,7 @@ import dinov2.dinov2.utils.utils as dinov2_utils
 
 from no_time_to_train.models.matching_baseline_utils import kmeans, kmeans_decouple
 from no_time_to_train.models.model_utils import concat_all_gather
+from no_time_to_train.models.dinov3_utils import get_dinov3_model, load_pretrained_weights as load_dinov3_weights, DINOV3_CONFIGS
 from no_time_to_train.utils import print_dict
 from no_time_to_train.models.matching_baseline_utils import vis_pca, vis_kmeans, fast_l2
 
@@ -35,6 +36,7 @@ import time
 
 PRINT_TIMING = False
 
+# DINOv2 configurations
 encoder_predefined_cfgs = {
     "dinov2_large": dict(
         model_size="vit_large",
@@ -49,6 +51,9 @@ encoder_predefined_cfgs = {
         feat_dim=1024
     )
 }
+
+# Add DINOv3 configurations
+encoder_predefined_cfgs.update(DINOV3_CONFIGS)
 
 
 
@@ -104,8 +109,18 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         self.encoder_dim = encoder_args.pop("feat_dim")
 
         self.encoder_transform = Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-        self.encoder = dinov2_vit.__dict__[encoder_args.pop("model_size")](**encoder_args)
-        dinov2_utils.load_pretrained_weights(self.encoder, encoder_ckpt_path, "teacher")
+        
+        # Initialize encoder based on model type (DINOv2 or DINOv3)
+        if encoder_name.startswith("dinov3"):
+            # DINOv3 model
+            self.encoder = get_dinov3_model(encoder_args.pop("model_size"), **encoder_args)
+            load_dinov3_weights(self.encoder, encoder_ckpt_path, "teacher")
+            self.encoder_type = "dinov3"
+        else:
+            # DINOv2 model
+            self.encoder = dinov2_vit.__dict__[encoder_args.pop("model_size")](**encoder_args)
+            dinov2_utils.load_pretrained_weights(self.encoder, encoder_ckpt_path, "teacher")
+            self.encoder_type = "dinov2"
 
         self.predictor.eval()
         self.encoder.eval()
@@ -487,18 +502,35 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         assert len(imgs.shape) == 4
         B = imgs.shape[0]
 
-        x = self.encoder.prepare_tokens_with_masks(imgs)
-        n_skip_tokens = 1 + self.encoder.num_register_tokens
-        for i, blk in enumerate(self.encoder.blocks):
-            if i < len(self.encoder.blocks) - 1:
-                x = blk(x)
-            else:
-                x, attn = blk(x, ret_attn=True)
-                attn = attn.mean(dim=1)[:, n_skip_tokens :, n_skip_tokens :]
-        x = self.encoder.norm(x)
-        last_attn = attn
-        feats = x[:, n_skip_tokens :]
-        feats = feats.reshape(B, -1, self.encoder_dim)
+        if self.encoder_type == "dinov3":
+            # DINOv3 forward pass
+            x = self.encoder.prepare_tokens_with_masks(imgs)
+            n_skip_tokens = 1 + getattr(self.encoder, 'n_storage_tokens', 0)
+            for i, blk in enumerate(self.encoder.blocks):
+                if i < len(self.encoder.blocks) - 1:
+                    x = blk(x)
+                else:
+                    x, attn = blk(x, ret_attn=True)
+                    attn = attn.mean(dim=1)[:, n_skip_tokens :, n_skip_tokens :]
+            x = self.encoder.norm(x)
+            last_attn = attn
+            feats = x[:, n_skip_tokens :]
+            feats = feats.reshape(B, -1, self.encoder_dim)
+        else:
+            # DINOv2 forward pass
+            x = self.encoder.prepare_tokens_with_masks(imgs)
+            n_skip_tokens = 1 + self.encoder.num_register_tokens
+            for i, blk in enumerate(self.encoder.blocks):
+                if i < len(self.encoder.blocks) - 1:
+                    x = blk(x)
+                else:
+                    x, attn = blk(x, ret_attn=True)
+                    attn = attn.mean(dim=1)[:, n_skip_tokens :, n_skip_tokens :]
+            x = self.encoder.norm(x)
+            last_attn = attn
+            feats = x[:, n_skip_tokens :]
+            feats = feats.reshape(B, -1, self.encoder_dim)
+        
         return feats, last_attn
 
     def _forward_encoder_attn_roll(self, imgs):
