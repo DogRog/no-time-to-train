@@ -383,7 +383,15 @@ class Sam2Matcher(nn.Module):
         # Initialize encoder based on model type (DINOv2 or DINOv3)
         if encoder_name.startswith("dinov3"):
             # DINOv3 model
-            self.encoder = get_dinov3_model(encoder_args.pop("model_size"), **encoder_args)
+            # Remove architecture-specific params that are hardcoded in vit_* functions
+            model_size = encoder_args.pop("model_size")
+            # These params are already set in the vit_* function definitions
+            encoder_args.pop("embed_dim", None)
+            encoder_args.pop("depth", None)
+            encoder_args.pop("num_heads", None)
+            encoder_args.pop("ffn_ratio", None)
+            
+            self.encoder = get_dinov3_model(model_size, **encoder_args)
             load_dinov3_weights(self.encoder, encoder_ckpt_path, "teacher")
             self.encoder_type = "dinov3"
         else:

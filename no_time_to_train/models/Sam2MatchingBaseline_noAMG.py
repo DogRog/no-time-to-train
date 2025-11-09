@@ -97,15 +97,20 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
 
         encoder_name = encoder_cfg.pop("name")
         encoder_args = copy.deepcopy(encoder_predefined_cfgs.get(encoder_name))
-        # encoder_args.update(encoder_cfg)
-
+        
+        # Update encoder_args with values from config file
         encoder_img_size = encoder_cfg.get("img_size")
         encoder_patch_size = encoder_cfg.get("patch_size")
-        encoder_hw = encoder_img_size // encoder_patch_size
+        if encoder_img_size is not None:
+            encoder_args["img_size"] = encoder_img_size
+        if encoder_patch_size is not None:
+            encoder_args["patch_size"] = encoder_patch_size
+        
+        encoder_hw = encoder_args["img_size"] // encoder_args["patch_size"]
 
         self.encoder_h, self.encoder_w = encoder_hw, encoder_hw
-        self.encoder_img_size = encoder_img_size
-        self.encoder_patch_size = encoder_patch_size
+        self.encoder_img_size = encoder_args["img_size"]
+        self.encoder_patch_size = encoder_args["patch_size"]
         self.encoder_dim = encoder_args.pop("feat_dim")
 
         self.encoder_transform = Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
@@ -113,7 +118,15 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         # Initialize encoder based on model type (DINOv2 or DINOv3)
         if encoder_name.startswith("dinov3"):
             # DINOv3 model
-            self.encoder = get_dinov3_model(encoder_args.pop("model_size"), **encoder_args)
+            # Remove architecture-specific params that are hardcoded in vit_* functions
+            model_size = encoder_args.pop("model_size")
+            # These params are already set in the vit_* function definitions
+            encoder_args.pop("embed_dim", None)
+            encoder_args.pop("depth", None) 
+            encoder_args.pop("num_heads", None)
+            encoder_args.pop("ffn_ratio", None)
+            
+            self.encoder = get_dinov3_model(model_size, **encoder_args)
             load_dinov3_weights(self.encoder, encoder_ckpt_path, "teacher")
             self.encoder_type = "dinov3"
         else:
