@@ -14,13 +14,8 @@ import torch.utils.data.distributed
 
 from pytorch_lightning import LightningModule
 
-
-from no_time_to_train.models.Sam2Matcher import Sam2Matcher
-from no_time_to_train.models.Sam2MatchingBaseline import Sam2MatchingBaseline
 from no_time_to_train.models.Sam2MatchingBaseline_noAMG import Sam2MatchingBaselineNoAMG
-
 from no_time_to_train.dataset.metainfo import METAINFO
-
 from no_time_to_train.dataset.coco_ref_dataset import (
     COCORefTrainDataset,
     COCOMemoryFillDataset,
@@ -128,11 +123,7 @@ class Sam2MatcherLightningModel(LightningModule):
         self.model_cfg = copy.deepcopy(model_cfg)
 
         model_name = model_cfg.pop("name").lower()
-        if model_name == "matcher":
-            self.seg_model = Sam2Matcher(**model_cfg)
-        elif model_name == "matching_baseline":
-            self.seg_model = Sam2MatchingBaseline(**model_cfg)
-        elif model_name == "matching_baseline_noamg":
+        if model_name == "matching_baseline_noamg":
             self.seg_model = Sam2MatchingBaselineNoAMG(**model_cfg)
         else:
             raise NotImplementedError(f"Unrecognized model name: {model_name}")
