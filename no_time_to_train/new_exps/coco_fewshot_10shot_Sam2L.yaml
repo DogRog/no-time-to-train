@@ -20,7 +20,8 @@ model:
         name: "dinov2_large"
         img_size: 518
         patch_size: 14
-      encoder_ckpt_path: "./checkpoints/dinov2/dinov2_vitl14_pretrain.pth"
+        hf_model_name: "facebook/dinov2-large"
+      encoder_ckpt_path: null
       memory_bank_cfg:
         enable: True
         category_num: 20

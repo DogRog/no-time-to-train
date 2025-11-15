@@ -1,6 +1,8 @@
 import copy
 import os
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -10,8 +12,16 @@ import torch.nn.functional as F
 from sklearn.decomposition import PCA
 from torchvision.ops.boxes import batched_nms
 from torchvision.transforms import Normalize
-from transformers import Dinov2Model
-from huggingface_hub import snapshot_download
+
+try:
+    import dinov3.hub.backbones as dinov3_backbones  # type: ignore[import]
+except ModuleNotFoundError:  # pragma: no cover - environment dependent
+    repo_root = Path(__file__).resolve().parents[2]
+    if str(repo_root) not in sys.path:
+        sys.path.append(str(repo_root))
+    import dinov3.hub.backbones as dinov3_backbones  # type: ignore[import]
+
+Dinov3Weights = dinov3_backbones.Weights
 
 from sam2.build_sam import build_sam2_video_predictor
 from sam2.utils.amg import batched_mask_to_box
@@ -25,18 +35,60 @@ from no_time_to_train.models.model_utils import concat_all_gather
 PRINT_TIMING = False
 
 encoder_predefined_cfgs = {
-    "dinov2_large": dict(
-        img_size=518,
-        patch_size=14,
-        init_values=1e-5,
-        ffn_layer='mlp',
-        block_chunks=0,
-        qkv_bias=True,
-        proj_bias=True,
-        ffn_bias=True,
+    "dinov3_vits16": dict(
+        img_size=224,
+        patch_size=16,
+        feat_dim=384,
+        builder="dinov3_vits16",
+        weights="LVD1689M",
+        pretrained=True,
+        check_hash=False,
+    ),
+    "dinov3_vits16plus": dict(
+        img_size=224,
+        patch_size=16,
+        feat_dim=384,
+        builder="dinov3_vits16plus",
+        weights="LVD1689M",
+        pretrained=True,
+        check_hash=False,
+    ),
+    "dinov3_vitb16": dict(
+        img_size=224,
+        patch_size=16,
+        feat_dim=768,
+        builder="dinov3_vitb16",
+        weights="LVD1689M",
+        pretrained=True,
+        check_hash=False,
+    ),
+    "dinov3_vitl16": dict(
+        img_size=224,
+        patch_size=16,
         feat_dim=1024,
-        hf_model_name="facebook/dinov2-large"
-    )
+        builder="dinov3_vitl16",
+        weights="LVD1689M",
+        pretrained=True,
+        check_hash=False,
+    ),
+    "dinov3_vitl16plus": dict(
+        img_size=224,
+        patch_size=16,
+        feat_dim=1024,
+        builder="dinov3_vitl16plus",
+        weights="LVD1689M",
+        pretrained=True,
+        check_hash=False,
+    ),
+    "dinov3_vit7b16": dict(
+        img_size=224,
+        patch_size=16,
+        feat_dim=4096,
+        builder="dinov3_vit7b16",
+        weights="LVD1689M",
+        pretrained=True,
+        check_hash=False,
+    ),
 }
 
 
@@ -88,40 +140,70 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
 
         encoder_img_size = encoder_cfg.get("img_size", encoder_defaults.get("img_size"))
         encoder_patch_size = encoder_cfg.get("patch_size", encoder_defaults.get("patch_size"))
-        encoder_hw = encoder_img_size // encoder_patch_size
 
-        self.encoder_h, self.encoder_w = encoder_hw, encoder_hw
-        self.encoder_img_size = encoder_img_size
-        self.encoder_patch_size = encoder_patch_size
-        hf_model_id = encoder_cfg.pop("hf_model_name", None)
-        if hf_model_id is None:
-            if encoder_ckpt_path is not None:
-                hf_model_id = encoder_ckpt_path
-            else:
-                hf_model_id = encoder_defaults.get("hf_model_name")
+        if encoder_img_size is None or encoder_patch_size is None:
+            raise ValueError("Encoder configuration must provide 'img_size' and 'patch_size'.")
+
+        builder_name = encoder_cfg.pop("builder", encoder_defaults.get("builder"))
+        if builder_name is None:
+            raise KeyError("Encoder configuration must provide a DINOv3 builder identifier via 'builder'.")
+        encoder_builder = self._get_encoder_builder(builder_name)
+
+        pretrained = encoder_cfg.pop("pretrained", encoder_defaults.get("pretrained", True))
+        check_hash = encoder_cfg.pop("check_hash", encoder_defaults.get("check_hash", False))
+        weights_spec = encoder_cfg.pop("weights", encoder_defaults.get("weights"))
+        feat_dim_override = encoder_cfg.pop("feat_dim", encoder_defaults.get("feat_dim"))
+
+        builder_kwargs = encoder_cfg
+        builder_kwargs.setdefault("img_size", encoder_img_size)
+        builder_kwargs.setdefault("patch_size", encoder_patch_size)
+
+        if encoder_ckpt_path is not None:
+            weights_arg = encoder_ckpt_path
+            pretrained = True
+        else:
+            weights_arg = weights_spec
+
+        weights_arg = self._normalize_dinov3_weights(weights_arg)
 
         self.encoder_transform = Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 
-        if hf_model_id is None:
-            raise ValueError(
-                "A Hugging Face Dinov2 repository ID or local directory (hf_model_name/encoder_ckpt_path) must be provided."
-            )
-
-        hf_model_id = self._resolve_encoder_checkpoint(hf_model_id, encoder_defaults)
-
         try:
-            self.encoder = Dinov2Model.from_pretrained(hf_model_id)
-        except OSError as exc:
+            self.encoder = encoder_builder(
+                pretrained=pretrained,
+                weights=weights_arg,
+                check_hash=check_hash,
+                **builder_kwargs,
+            )
+        except Exception as exc:
             raise RuntimeError(
-                f"Failed to load Dinov2 model from '{hf_model_id}'. Ensure it is a Hugging Face repository ID or"
-                " a directory containing a compatible Transformers checkpoint."
+                f"Failed to instantiate DINOv3 encoder '{builder_name}' with weights '{weights_arg}'."
             ) from exc
 
-        self.encoder_dim = self.encoder.config.hidden_size
+        self.encoder_img_size = builder_kwargs.get("img_size", encoder_img_size)
+        self.encoder_patch_size = getattr(self.encoder, "patch_size", builder_kwargs.get("patch_size"))
+        if self.encoder_patch_size is None:
+            raise AttributeError("DINOv3 encoder does not expose 'patch_size'; please specify it explicitly.")
+        if self.encoder_img_size % self.encoder_patch_size != 0:
+            raise ValueError("Encoder image size must be divisible by the patch size.")
+
+        encoder_hw = self.encoder_img_size // self.encoder_patch_size
+        self.encoder_h, self.encoder_w = encoder_hw, encoder_hw
+
+        self.encoder_dim = getattr(self.encoder, "num_features", None)
+        if self.encoder_dim is None:
+            self.encoder_dim = getattr(self.encoder, "embed_dim", None)
+        if self.encoder_dim is None:
+            if feat_dim_override is not None:
+                self.encoder_dim = feat_dim_override
+            else:
+                raise AttributeError("Unable to determine encoder feature dimension; set 'feat_dim'.")
+
         self.encoder.to(self.predictor.device)
+        self.encoder.eval()
+        self.encoder.requires_grad_(False)
 
         self.predictor.eval()
-        self.encoder.eval()
 
         # Others
         memory_bank_cfg["feat_shape"] = (self.encoder_h * self.encoder_w, self.encoder_dim)
@@ -222,48 +304,45 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
 
     def _forward_encoder(self, imgs):
         assert len(imgs.shape) == 4
-        n_skip_tokens = 1 + getattr(self.encoder.config, "num_register_tokens", 0)
-        outputs = self.encoder(pixel_values=imgs, output_hidden_states=False)
-        seq_feats = outputs.last_hidden_state
-        feats = seq_feats[:, n_skip_tokens:, :]
-        feats = feats.reshape(imgs.shape[0], -1, self.encoder_dim)
+        with torch.inference_mode():
+            outputs = self.encoder.forward_features(imgs)
+        if not isinstance(outputs, dict):
+            raise TypeError("DINOv3 encoder forward_features must return a dict with patch tokens.")
+        patch_tokens = outputs.get("x_norm_patchtokens")
+        if patch_tokens is None:
+            raise KeyError("DINOv3 encoder output missing 'x_norm_patchtokens'.")
+        feats = patch_tokens.reshape(imgs.shape[0], -1, self.encoder_dim)
         return feats
 
-    def _resolve_encoder_checkpoint(self, hf_model_id: str, encoder_defaults: dict) -> str:
-        """Ensure the encoder checkpoint is a valid Hugging Face repo id or local directory.
+    def _normalize_dinov3_weights(self, weights_spec):
+        if weights_spec is None:
+            return Dinov3Weights.LVD1689M
+        if isinstance(weights_spec, Dinov3Weights):
+            return weights_spec
+        if isinstance(weights_spec, str):
+            lowered = weights_spec.lower()
+            if lowered.startswith(("http://", "https://", "file://")):
+                return weights_spec
+            if lowered.endswith(".pth") or os.path.exists(weights_spec):
+                return weights_spec
+            if "/" in weights_spec or "\\" in weights_spec:
+                return weights_spec
+            upper = weights_spec.upper()
+            if upper in Dinov3Weights.__members__:
+                return Dinov3Weights[upper]
+            for enum in Dinov3Weights:
+                if lowered == enum.value.lower():
+                    return enum
+            return weights_spec
+        return weights_spec
 
-        If a legacy *.pth path is provided, download the corresponding repo and return the local directory.
-        """
-
-        # Accept already-downloaded directories or valid repo ids directly.
-        if os.path.isdir(hf_model_id):
-            return hf_model_id
-
-        # If a legacy checkpoint file path is supplied, download the HF model next to it.
-        if os.path.isfile(hf_model_id):
-            repo_id = encoder_defaults.get("hf_model_name")
-            if repo_id is None:
-                raise ValueError(
-                    "Legacy checkpoint path provided but no default Hugging Face repo id is available for download."
-                )
-
-            target_dir = os.path.splitext(hf_model_id)[0] + "_hf"
-            if not os.path.isdir(target_dir) or not os.listdir(target_dir):
-                try:
-                    snapshot_download(
-                        repo_id=repo_id,
-                        local_dir=target_dir,
-                        local_dir_use_symlinks=False,
-                    )
-                except Exception as exc:  # pragma: no cover - network dependent
-                    raise RuntimeError(
-                        "Failed to download Hugging Face Dinov2 checkpoint. Please ensure network access or manually "
-                        f"download '{repo_id}' into '{target_dir}'."
-                    ) from exc
-            return target_dir
-
-        # Otherwise assume it's a repo id string understood by Transformers.
-        return hf_model_id
+    def _get_encoder_builder(self, builder_name: str):
+        if not hasattr(dinov3_backbones, builder_name):
+            raise KeyError(f"Unsupported DINOv3 builder '{builder_name}'.")
+        builder = getattr(dinov3_backbones, builder_name)
+        if not callable(builder):
+            raise TypeError(f"Requested DINOv3 builder '{builder_name}' is not callable.")
+        return builder
 
     def _forward_sam_decoder(
         self,

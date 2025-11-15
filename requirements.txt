@@ -41,6 +41,7 @@ lvis==0.5.3
 fvcore==0.1.5.post20221221
 iopath==0.1.10
 submitit==1.5.2
+transformers>=4.40.0
 
 # Experiment Tracking
 wandb==0.18.2
