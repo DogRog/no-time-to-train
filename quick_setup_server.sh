@@ -20,6 +20,13 @@ pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorc
 echo "Installing dependencies from requirements.txt..."
 pip install -r requirements.txt
 
+# Install additional core tooling
+echo "Installing tidecv and transformers..."
+pip install tidecv transformers
+
+echo "Upgrading jsonargparse with signature support..."
+pip install --upgrade "jsonargparse[signatures]>=4.18.0"
+
 # Install the main package
 echo "Installing no-time-to-train package..."
 pip install -e .

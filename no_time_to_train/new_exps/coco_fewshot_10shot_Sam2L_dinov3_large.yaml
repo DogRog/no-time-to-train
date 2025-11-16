@@ -17,10 +17,10 @@ model:
         n_pca_components: 3
         cls_num_per_mask: 1
       encoder_cfg:
-        name: "dinov3_large"
-        img_size: 518
+        name: "dinov3_vitl16"
+        img_size: 224
         patch_size: 16
-      encoder_ckpt_path: "./checkpoints/dinov3/dinov3_vitl16_pretrain.pth"
+      encoder_ckpt_path: null
       memory_bank_cfg:
         enable: True
         category_num: 20
@@ -32,7 +32,7 @@ model:
         json_file : "./data/coco/annotations/instances_train2017.json"
         memory_pkl: "./data/coco/annotations_refsam2/memory/train2017_allClasses_length10_v1.pkl"
         # class_split: "few_shot_classes"
-        image_size: 518
+        image_size: 224
         memory_length: 10
         context_ratio: 0.2
         norm_img: False
@@ -45,10 +45,10 @@ model:
         norm_img: False
         with_query_points: False
     data_load_cfgs:
-      workers: 4
+      workers: 0
 
 trainer:
-  devices: 4
+  devices: 1
   benchmark: true
   precision: 32
   callbacks:
