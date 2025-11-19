@@ -57,7 +57,7 @@ run_sam_segmentation() {
 
 # THIRD STEP: Fill memory with references
 # --------------------
-CUDA_VISIBLE_DEVICES=$DEVICES python run_lightening.py test --config $YAML_PATH \
+CUDA_VISIBLE_DEVICES=$DEVICES python run_lightning.py test --config $YAML_PATH \
     --model.test_mode fill_memory \
     --out_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory.pth \
     --model.init_args.dataset_cfgs.fill_memory.root $DATASET_PATH/train \
@@ -74,7 +74,7 @@ echo "Third step done: Memory filled"
 
 # FOURTH STEP: Postprocess memories, e.g., computer averages and run kmeans
 # --------------------
-CUDA_VISIBLE_DEVICES=$DEVICES python run_lightening.py test --config $YAML_PATH \
+CUDA_VISIBLE_DEVICES=$DEVICES python run_lightning.py test --config $YAML_PATH \
     --model.test_mode postprocess_memory \
     --ckpt_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory.pth \
     --out_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory_postprocessed.pth \
@@ -87,7 +87,7 @@ echo "Fourth step done: Postprocessing memories"
 # FIFTH STEP: Testing on the target set
 # --------------------
 echo -e "\033[31mEVALUATING $SHOT SHOT FOR DATASET $DATASET_NAME\033[0m"
-CUDA_VISIBLE_DEVICES=$DEVICES python run_lightening.py test --config $YAML_PATH \
+CUDA_VISIBLE_DEVICES=$DEVICES python run_lightning.py test --config $YAML_PATH \
     --model.test_mode test \
     --ckpt_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory_postprocessed.pth \
     --model.init_args.model_cfg.dataset_name $DATASET_NAME \

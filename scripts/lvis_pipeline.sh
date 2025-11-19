@@ -60,7 +60,7 @@ fi
 python no_time_to_train/dataset/few_shot_sampling.py --n-shot $SHOTS --out-path ${RESULTS_DIR}/${FILENAME} --seed $SEED \
                                                --dataset lvis --plot --img-dir ./data/coco/allimages
 
-python run_lightening.py test --config $YAML_FILE \
+python run_lightning.py test --config $YAML_FILE \
                               --model.test_mode fill_memory \
                               --out_path ${RESULTS_DIR}/memory.ckpt \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
@@ -72,7 +72,7 @@ python run_lightening.py test --config $YAML_FILE \
                               --trainer.logger.save_dir ${RESULTS_DIR}/ \
                               --trainer.devices $GPUS
 
-python run_lightening.py test --config $YAML_FILE \
+python run_lightning.py test --config $YAML_FILE \
                               --model.test_mode postprocess_memory \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
                               --model.init_args.model_cfg.memory_bank_cfg.category_num $CAT_NUM \
@@ -81,7 +81,7 @@ python run_lightening.py test --config $YAML_FILE \
                               --trainer.logger.save_dir ${RESULTS_DIR}/ \
                               --trainer.devices 1
 
-python run_lightening.py test --config $YAML_FILE \
+python run_lightning.py test --config $YAML_FILE \
                               --ckpt_path ${RESULTS_DIR}/memory_postprocessed.ckpt \
                               --model.init_args.test_mode test \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \

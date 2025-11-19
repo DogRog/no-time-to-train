@@ -19,7 +19,7 @@ FIRST_DEVICE=${DEVICES%%,*}
 # FIFTH STEP: Testing on the target set. With visualisation enabled in the .py file
 # --------------------
 echo -e "\033[31mEVALUATING $SHOT SHOT FOR DATASET $DATASET_NAME\033[0m"
-CUDA_VISIBLE_DEVICES=$DEVICES python run_lightening.py test --config $YAML_PATH \
+CUDA_VISIBLE_DEVICES=$DEVICES python run_lightning.py test --config $YAML_PATH \
     --model.test_mode test \
     --ckpt_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory_postprocessed.pth \
     --model.init_args.model_cfg.dataset_name $DATASET_NAME \

@@ -16,7 +16,7 @@ python no_time_to_train/dataset/few_shot_sampling.py \
         --seed $SEED \
         --dataset $CLASS_SPLIT
 
-python run_lightening.py test --config $CONFIG \
+python run_lightning.py test --config $CONFIG \
                               --model.test_mode fill_memory \
                               --out_path ${RESULTS_DIR}/memory.ckpt \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
@@ -26,7 +26,7 @@ python run_lightening.py test --config $CONFIG \
                               --trainer.logger.save_dir ${RESULTS_DIR}/ \
                               --trainer.devices $GPUS
 
-python run_lightening.py test --config $CONFIG \
+python run_lightning.py test --config $CONFIG \
                               --model.test_mode postprocess_memory \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
                               --ckpt_path ${RESULTS_DIR}/memory.ckpt \
@@ -34,7 +34,7 @@ python run_lightening.py test --config $CONFIG \
                               --trainer.devices 1
 
 
-python run_lightening.py test --config $CONFIG  \
+python run_lightning.py test --config $CONFIG  \
                               --ckpt_path ${RESULTS_DIR}/memory_postprocessed.ckpt \
                               --model.init_args.test_mode test \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \

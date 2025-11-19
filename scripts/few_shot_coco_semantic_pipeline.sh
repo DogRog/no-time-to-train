@@ -39,7 +39,7 @@ for SHOT in "${SHOTS[@]}"; do
                                                 --img-dir ./data/coco/train2017 \
                                                 --plot
 
-    python run_lightening.py test --config $YAML_FILE \
+    python run_lightning.py test --config $YAML_FILE \
                                 --model.test_mode fill_memory \
                                 --out_path $RESULTS_DIR/memory.ckpt \
                                 --model.init_args.model_cfg.memory_bank_cfg.length $SHOT \
@@ -50,7 +50,7 @@ for SHOT in "${SHOTS[@]}"; do
                                 --trainer.logger.save_dir $RESULTS_DIR/ \
                                 --trainer.devices $GPUS
 
-    python run_lightening.py test --config $YAML_FILE \
+    python run_lightning.py test --config $YAML_FILE \
                                 --model.test_mode postprocess_memory \
                                 --model.init_args.model_cfg.memory_bank_cfg.length $SHOT \
                                 --model.init_args.model_cfg.memory_bank_cfg.category_num $CATEGORY_NUM \
@@ -59,7 +59,7 @@ for SHOT in "${SHOTS[@]}"; do
                                 --trainer.logger.save_dir $RESULTS_DIR/ \
                                 --trainer.devices 1
 
-    python run_lightening.py test --config $YAML_FILE  \
+    python run_lightning.py test --config $YAML_FILE  \
                                 --ckpt_path $RESULTS_DIR/memory_postprocessed.ckpt \
                                 --model.init_args.test_mode test \
                                 --model.init_args.model_cfg.memory_bank_cfg.length $SHOT \

@@ -194,7 +194,7 @@ python no_time_to_train/dataset/few_shot_sampling.py \
 #### 1. Fill memory with references
 
 ```bash
-python run_lightening.py test --config $CONFIG \
+python run_lightning.py test --config $CONFIG \
                               --model.test_mode fill_memory \
                               --out_path ${RESULTS_DIR}/memory.ckpt \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
@@ -208,7 +208,7 @@ python run_lightening.py test --config $CONFIG \
 #### 2. Post-process memory bank
 
 ```bash
-python run_lightening.py test --config $CONFIG \
+python run_lightning.py test --config $CONFIG \
                               --model.test_mode postprocess_memory \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
                               --ckpt_path ${RESULTS_DIR}/memory.ckpt \
@@ -219,7 +219,7 @@ python run_lightening.py test --config $CONFIG \
 #### 3. Inference on target images
 
 ```bash
-python run_lightening.py test --config $CONFIG  \
+python run_lightning.py test --config $CONFIG  \
                               --ckpt_path ${RESULTS_DIR}/memory_postprocessed.ckpt \
                               --model.init_args.test_mode test \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
@@ -354,7 +354,7 @@ mkdir -p $PATH_TO_SAVE_CKPTS
 Run step 1:
 
 ```bash
-python run_lightening.py test --config $YAML_PATH \
+python run_lightning.py test --config $YAML_PATH \
     --model.test_mode fill_memory \
     --out_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory.pth \
     --model.init_args.dataset_cfgs.fill_memory.root $DATASET_PATH/images \
@@ -371,7 +371,7 @@ python run_lightening.py test --config $YAML_PATH \
 ### 2. Post-process memory bank
 
 ```bash
-python run_lightening.py test --config $YAML_PATH \
+python run_lightning.py test --config $YAML_PATH \
     --model.test_mode postprocess_memory \
     --ckpt_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory.pth \
     --out_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory_postprocessed.pth \
@@ -390,7 +390,7 @@ Feel free to change the score threshold `VIS_THR` to see more or less segmented 
 ```bash
 ONLINE_VIS=True
 VIS_THR=0.4
-python run_lightening.py test --config $YAML_PATH \
+python run_lightning.py test --config $YAML_PATH \
     --model.test_mode test \
     --ckpt_path $PATH_TO_SAVE_CKPTS/$DATASET_NAME\_$SHOT\_refs_memory_postprocessed.pth \
     --model.init_args.model_cfg.dataset_name $DATASET_NAME \
