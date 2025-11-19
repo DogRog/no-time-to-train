@@ -36,6 +36,18 @@ encoder_predefined_cfgs = {
         ffn_bias=True,
         feat_dim=1024,
         hf_model_name="facebook/dinov2-large"
+    ),
+    "dinov3_vitl16": dict(
+        img_size=518,
+        patch_size=16,
+        init_values=1e-5,
+        ffn_layer='mlp',
+        block_chunks=0,
+        qkv_bias=True,
+        proj_bias=True,
+        ffn_bias=True,
+        feat_dim=1024,
+        hf_model_name="facebook/dinov3-vitl16-pretrain-lvd1689m"
     )
 }
 
@@ -57,6 +69,15 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         vis_thr=0.5
     ):
         super(Sam2MatchingBaselineNoAMG, self).__init__()
+
+        print("Model Parameters:")
+        print(f"sam2_cfg_file: {sam2_cfg_file}")
+        print(f"sam2_ckpt_path: {sam2_ckpt_path}")
+        print(f"sam2_infer_cfgs: {sam2_infer_cfgs}")
+        print(f"encoder_cfg: {encoder_cfg}")
+        print(f"encoder_ckpt_path: {encoder_ckpt_path}")
+        print(f"memory_bank_cfg: {memory_bank_cfg}")
+        print(f"dataset_name: {dataset_name}")
 
         self.dataset_name = dataset_name
         self.class_names = class_names
@@ -109,26 +130,29 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
 
         hf_model_id = self._resolve_encoder_checkpoint(hf_model_id, encoder_defaults)
 
-        try:
-            # Use a Transformers pipeline to initialize and cache the Dinov2 encoder weights.
-            feature_pipeline = pipeline(
-                task="feature-extraction",
-                model=hf_model_id,
-            )
-            self.encoder = feature_pipeline.model
-        except OSError as exc:
-            raise RuntimeError(
-                f"Failed to load Dinov2 model from '{hf_model_id}'. Ensure it is a Hugging Face repository ID or"
-                " a directory containing a compatible Transformers checkpoint."
-            ) from exc
-        except Exception as exc:
+        if "dinov3" in encoder_name:
+            self.encoder = AutoModel.from_pretrained(hf_model_id)
+        else:
             try:
-                # Fall back to the generic auto model loader if pipeline initialisation fails for non-IO reasons.
-                self.encoder = AutoModel.from_pretrained(hf_model_id)
-            except Exception as auto_exc:  # pragma: no cover - network dependent
+                # Use a Transformers pipeline to initialize and cache the Dinov2 encoder weights.
+                feature_pipeline = pipeline(
+                    task="feature-extraction",
+                    model=hf_model_id,
+                )
+                self.encoder = feature_pipeline.model
+            except OSError as exc:
                 raise RuntimeError(
-                    f"Failed to initialise Dinov2 encoder via pipeline or AutoModel for '{hf_model_id}'."
-                ) from auto_exc
+                    f"Failed to load Dinov2 model from '{hf_model_id}'. Ensure it is a Hugging Face repository ID or"
+                    " a directory containing a compatible Transformers checkpoint."
+                ) from exc
+            except Exception as exc:
+                try:
+                    # Fall back to the generic auto model loader if pipeline initialisation fails for non-IO reasons.
+                    self.encoder = AutoModel.from_pretrained(hf_model_id)
+                except Exception as auto_exc:  # pragma: no cover - network dependent
+                    raise RuntimeError(
+                        f"Failed to initialise Dinov2 encoder via pipeline or AutoModel for '{hf_model_id}'."
+                    ) from auto_exc
 
         self.encoder_dim = self.encoder.config.hidden_size
         self.encoder.to(self.predictor.device)
