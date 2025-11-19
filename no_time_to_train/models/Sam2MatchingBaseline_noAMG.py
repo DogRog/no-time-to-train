@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from sklearn.decomposition import PCA
 from torchvision.ops.boxes import batched_nms
 from torchvision.transforms import Normalize
-from transformers import Dinov2Model
+from transformers import AutoModel, pipeline
 from huggingface_hub import snapshot_download
 
 from sam2.build_sam import build_sam2_video_predictor
@@ -110,12 +110,25 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         hf_model_id = self._resolve_encoder_checkpoint(hf_model_id, encoder_defaults)
 
         try:
-            self.encoder = Dinov2Model.from_pretrained(hf_model_id)
+            # Use a Transformers pipeline to initialize and cache the Dinov2 encoder weights.
+            feature_pipeline = pipeline(
+                task="feature-extraction",
+                model=hf_model_id,
+            )
+            self.encoder = feature_pipeline.model
         except OSError as exc:
             raise RuntimeError(
                 f"Failed to load Dinov2 model from '{hf_model_id}'. Ensure it is a Hugging Face repository ID or"
                 " a directory containing a compatible Transformers checkpoint."
             ) from exc
+        except Exception as exc:
+            try:
+                # Fall back to the generic auto model loader if pipeline initialisation fails for non-IO reasons.
+                self.encoder = AutoModel.from_pretrained(hf_model_id)
+            except Exception as auto_exc:  # pragma: no cover - network dependent
+                raise RuntimeError(
+                    f"Failed to initialise Dinov2 encoder via pipeline or AutoModel for '{hf_model_id}'."
+                ) from auto_exc
 
         self.encoder_dim = self.encoder.config.hidden_size
         self.encoder.to(self.predictor.device)

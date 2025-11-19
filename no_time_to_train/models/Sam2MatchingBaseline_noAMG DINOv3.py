@@ -25,18 +25,6 @@ from no_time_to_train.models.model_utils import concat_all_gather
 PRINT_TIMING = False
 
 encoder_predefined_cfgs = {
-    "dinov2_large": dict(
-        img_size=518,
-        patch_size=14,
-        init_values=1e-5,
-        ffn_layer='mlp',
-        block_chunks=0,
-        qkv_bias=True,
-        proj_bias=True,
-        ffn_bias=True,
-        feat_dim=1024,
-        hf_model_name="facebook/dinov2-large"
-    ),
     "dinov3_vitl16": dict(
         img_size=518,
         patch_size=16,
@@ -105,43 +93,12 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         self.encoder_h, self.encoder_w = encoder_hw, encoder_hw
         self.encoder_img_size = encoder_img_size
         self.encoder_patch_size = encoder_patch_size
-        hf_model_id = encoder_cfg.pop("hf_model_name", None)
-        if hf_model_id is None:
-            if encoder_ckpt_path is not None:
-                hf_model_id = encoder_ckpt_path
-            else:
-                hf_model_id = encoder_defaults.get("hf_model_name")
+        hf_model_id = encoder_cfg.pop("hf_model_name")
 
         self.encoder_transform = Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
 
-        if hf_model_id is None:
-            raise ValueError(
-                "A Hugging Face vision model repository ID or local directory (hf_model_name/encoder_ckpt_path) must be provided."
-            )
-
         hf_model_id = self._resolve_encoder_checkpoint(hf_model_id, encoder_defaults)
-
-        try:
-            # Use a Transformers pipeline to initialize and cache the encoder weights.
-            feature_pipeline = pipeline(
-                task="feature-extraction",
-                model=hf_model_id,
-            )
-            self.encoder = feature_pipeline.model
-        except OSError as exc:
-            raise RuntimeError(
-                f"Failed to load vision model from '{hf_model_id}'. Ensure it is a Hugging Face repository ID or"
-                " a directory containing a compatible Transformers checkpoint."
-            ) from exc
-        except Exception as exc:
-            try:
-                # Fall back to the generic auto model loader if pipeline initialisation fails for non-IO reasons.
-                self.encoder = AutoModel.from_pretrained(hf_model_id)
-            except Exception as auto_exc:  # pragma: no cover - network dependent
-                raise RuntimeError(
-                    f"Failed to initialise vision encoder via pipeline or AutoModel for '{hf_model_id}'."
-                ) from auto_exc
-
+        self.encoder = AutoModel.from_pretrained(hf_model_id)
         self.encoder_dim = self.encoder.config.hidden_size
         self.encoder.to(self.predictor.device)
 
