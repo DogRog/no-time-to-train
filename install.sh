@@ -8,7 +8,7 @@ set -e
 echo "Installing no-time-to-train..."
 
 # Check if in correct directory
-if [ ! -f "setup.py" ]; then
+if [ ! -f "pyproject.toml" ]; then
     echo "Error: Please run this script from the no-time-to-train root directory"
     exit 1
 fi
