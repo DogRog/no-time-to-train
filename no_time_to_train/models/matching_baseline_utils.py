@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -396,4 +395,314 @@ class SAM2AutomaticMaskGenerator_MatchingBaseline(SAM2AutomaticMaskGenerator):
         # Compress to RLE
         data["masks"] = uncrop_masks(data["masks"], crop_box, orig_h, orig_w)
         return data
+
+
+import torch.nn as nn
+
+class MemoryBank(nn.Module):
+    def __init__(self, config, kmeans_k, n_pca_components):
+        super().__init__()
+        self.n_classes = config.get("category_num")
+        self.length = config.get("length")
+        self.feat_shape = config.get("feat_shape")
+        self.kmeans_k = kmeans_k
+        self.n_pca_components = n_pca_components
+        
+        assert len(self.feat_shape) == 2
+        _mem_n, _mem_c = self.feat_shape
+
+        self.register_buffer("fill_counts", torch.zeros((self.n_classes,), dtype=torch.long))
+        self.register_buffer("feats", torch.zeros((self.n_classes, self.length, _mem_n, _mem_c)))
+        self.register_buffer("masks", torch.zeros((self.n_classes, self.length, _mem_n)))
+        self.register_buffer("feats_avg", torch.zeros((self.n_classes, _mem_c)))
+        self.register_buffer("feats_ins_avg", torch.zeros((self.n_classes, self.length, _mem_c)))
+        self.register_buffer("feats_covariances", torch.zeros((self.n_classes, _mem_c, _mem_c)))
+        self.register_buffer("feats_centers", torch.zeros((self.n_classes, self.kmeans_k, _mem_c)))
+        self.register_buffer("ins_sim_avg", torch.zeros((self.n_classes,)))
+        self.register_buffer("pca_mean", torch.zeros((self.n_classes, _mem_c)))
+        self.register_buffer("pca_components", torch.zeros((self.n_classes, self.n_pca_components, _mem_c)))
+        self.register_buffer("postprocessed", torch.zeros((1,), dtype=torch.bool))
+        self.ready = False
+
+    def postprocess(self):
+        # Compute class-wise average features
+        c = self.feats.shape[-1]
+
+        self.feats_avg *= 0.0
+        mem_feats_avg = (
+            torch.sum(self.feats * self.masks.unsqueeze(dim=-1), dim=(1, 2))
+            / self.masks.sum(dim=(1, 2)).unsqueeze(dim=1)
+        )
+        self.feats_avg += mem_feats_avg
+
+        mem_feats_ins_avg = (
+            torch.sum(self.feats * self.masks.unsqueeze(dim=-1), dim=2)
+            / self.masks.sum(dim=2).unsqueeze(dim=2)
+        )
+        self.feats_ins_avg += mem_feats_ins_avg
+
+        sigmas = []
+        for i in range(self.n_classes):
+            feats = self.feats[i]
+            masks = self.masks[i]
+            feats = feats[masks > 0]
+            if feats.shape[0] == 0:
+                sigmas.append(torch.eye(c, device=self.feats.device).unsqueeze(dim=0))
+                continue
+            feats = feats - self.feats_avg[i]
+            sigma = (feats.t() @ feats) / feats.shape[0]
+            sigmas.append(sigma.unsqueeze(dim=0))
+        sigmas = torch.cat(sigmas, dim=0)
+        self.feats_covariances += sigmas
+
+        ins_sims = []
+        for i in range(self.n_classes):
+            feats = self.feats_ins_avg[i]
+            if self.fill_counts[i] == 0:
+                ins_sims.append(torch.tensor(0.0, device=self.feats.device))
+                continue
+            feats = feats[:self.fill_counts[i]]
+            feats = F.normalize(feats, p=2, dim=-1)
+            sim = feats @ feats.t()
+            # remove diagonal
+            sim = sim[~torch.eye(sim.shape[0], dtype=torch.bool, device=self.feats.device)].reshape(sim.shape[0], -1)
+            ins_sims.append(sim.mean())
+        ins_sims = torch.stack(ins_sims).reshape(self.n_classes)
+        self.ins_sim_avg += ins_sims
+
+        # K-means
+        for i in range(self.n_classes):
+            feats = self.feats[i]
+            masks = self.masks[i]
+            feats = feats[masks > 0]
+            if feats.shape[0] < self.kmeans_k:
+                continue
+            centers = kmeans(feats, self.kmeans_k)
+            self.feats_centers[i] = centers
+
+        # PCA
+        for i in range(self.n_classes):
+            feats = self.feats[i]
+            masks = self.masks[i]
+            feats = feats[masks > 0]
+            if feats.shape[0] < self.n_pca_components:
+                continue
+            
+            # sklearn PCA on CPU
+            feats_np = feats.cpu().numpy()
+            pca = PCA(n_components=self.n_pca_components)
+            pca.fit(feats_np)
+            
+            self.pca_mean[i] = torch.from_numpy(pca.mean_).to(self.feats.device)
+            self.pca_components[i] = torch.from_numpy(pca.components_).to(self.feats.device)
+
+        self.postprocessed[0] = True
+
+
+import os
+from PIL import Image
+from no_time_to_train.dataset.visualization import vis_coco
+
+def vis_memory(input_dicts, memory_bank, encoder, encoder_transform, encoder_img_size, encoder_h, encoder_w, encoder_patch_size, device):
+    assert len(input_dicts) == 1
+    assert memory_bank.fill_counts[0].item() > 0
+    assert memory_bank.n_pca_components == 3  # RGB
+
+    output_dir = "./results_analysis/memory_vis"
+    os.makedirs(output_dir, exist_ok=True)
+
+    ref_cat_ind = list(input_dicts[0]["refs_by_cat"].keys())[0]
+
+    ref_imgs = input_dicts[0]["refs_by_cat"][ref_cat_ind]["imgs"].to(device=device)
+    ref_imgs = F.interpolate(
+        ref_imgs,
+        size=(encoder_img_size, encoder_img_size),
+        mode="bicubic"
+    )
+    ref_imgs_normed = encoder_transform(ref_imgs)
+    
+    # Forward encoder
+    n_skip_tokens = 1 + getattr(encoder.config, "num_register_tokens", 0)
+    outputs = encoder(pixel_values=ref_imgs_normed, output_hidden_states=False)
+    seq_feats = outputs.last_hidden_state
+    feats = seq_feats[:, n_skip_tokens:, :]
+    ref_feats = feats.reshape(ref_imgs.shape[0], -1, encoder.config.hidden_size)
+    ref_feats = ref_feats.reshape(-1, encoder.config.hidden_size)
+
+    ref_masks_ori = input_dicts[0]["refs_by_cat"][ref_cat_ind]["masks"].to(dtype=ref_feats.dtype, device=device)
+    ref_masks = F.interpolate(
+        ref_masks_ori.unsqueeze(dim=0),
+        size=(encoder_h, encoder_w),
+        mode="nearest"
+    ).reshape(-1)
+
+    encoder_shape_info = dict(
+        height=encoder_h,
+        width=encoder_w,
+        patch_size=encoder_patch_size
+    )
+
+    pca_vis_result = vis_pca(
+        ref_imgs,
+        ref_masks_ori,
+        ref_cat_ind,
+        ref_feats,
+        ref_masks,
+        memory_bank.pca_mean,
+        memory_bank.pca_components,
+        encoder_shape_info,
+        device,
+        transparency=1.0
+    )
+    kmeans_vis_result = vis_kmeans(
+        ref_imgs,
+        ref_masks_ori,
+        ref_cat_ind,
+        ref_feats,
+        ref_masks,
+        memory_bank.feats_centers,
+        encoder_shape_info,
+        device,
+        transparency=1.0
+    )
+    ori_img = ref_imgs[0].permute(1, 2, 0) * 255.0
+    margin = torch.zeros((ori_img.shape[0], 5, 3), dtype=ori_img.dtype, device=device) + 255
+    output_final = torch.cat((
+        ori_img, margin, kmeans_vis_result, margin, pca_vis_result
+    ), dim=1)
+
+    out_vis_img = Image.fromarray(output_final.cpu().numpy().astype(np.uint8))
+    img_id = int(input_dicts[0]["refs_by_cat"][ref_cat_ind]["img_info"][0]['id'])
+    out_vis_img.save(os.path.join(output_dir, "%d_%d.png" % (ref_cat_ind, img_id)))
+    return {}
+
+def vis_results_online(output_dict, tar_anns_by_cat, sam_img_size, score_thr=0.65, show_scores=False, dataset_name=None, dataset_imgs_path=None, class_names=None):
+    scores = output_dict["scores"].cpu().numpy()
+    masks_pred = output_dict["binary_masks"].cpu().numpy()
+    bboxes = output_dict["bboxes"].cpu().numpy()
+    labels = output_dict["labels"].cpu().numpy()
+
+    image_info = output_dict["image_info"]
+    
+    # Determine output path
+    if dataset_name == "coco" or dataset_name == "few_shot_classes":
+        img_path = os.path.join(dataset_imgs_path, image_info["file_name"])
+    elif dataset_name == "lvis":
+        img_path = os.path.join(dataset_imgs_path, image_info["file_name"])
+    else:
+        img_path = os.path.join(dataset_imgs_path, image_info["file_name"])
+        
+    out_dir = f"./results_analysis/{dataset_name}"
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, os.path.basename(image_info["file_name"]))
+
+    gt_masks = []
+    gt_bboxes = []
+    gt_labels = []
+
+    for cat_ind in tar_anns_by_cat.keys():
+        if "masks" in tar_anns_by_cat[cat_ind]:
+            gt_masks.append(tar_anns_by_cat[cat_ind]["masks"].cpu().numpy())
+        if "bboxes" in tar_anns_by_cat[cat_ind]:
+            gt_bboxes.append(tar_anns_by_cat[cat_ind]["bboxes"].cpu().numpy())
+        
+        n_items = len(tar_anns_by_cat[cat_ind]["bboxes"])
+        gt_labels.extend([cat_ind] * n_items)
+
+    if len(gt_bboxes) > 0:
+        gt_bboxes = np.concatenate(gt_bboxes)
+        # Scaling logic
+        gt_bboxes[:, 0] = gt_bboxes[:, 0] * image_info["ori_width"] / sam_img_size
+        gt_bboxes[:, 1] = gt_bboxes[:, 1] * image_info["ori_height"] / sam_img_size
+        gt_bboxes[:, 2] = gt_bboxes[:, 2] * image_info["ori_width"] / sam_img_size
+        gt_bboxes[:, 3] = gt_bboxes[:, 3] * image_info["ori_height"] / sam_img_size
+    
+    if len(gt_masks) > 0:
+        gt_masks = np.concatenate(gt_masks)
+        gt_masks = F.interpolate(
+            torch.from_numpy(gt_masks).unsqueeze(dim=1),
+            size=(image_info["ori_height"], image_info["ori_width"]),
+            mode="nearest"
+        ).squeeze(dim=1).numpy()
+    
+    vis_coco(
+        gt_bboxes,
+        gt_labels,
+        gt_masks,
+        scores,
+        labels,
+        bboxes,
+        masks_pred,
+        score_thr=score_thr,
+        img_path=img_path,
+        out_path=out_path,
+        show_scores=show_scores,
+        dataset_name=dataset_name,
+        class_names=class_names
+    )
+
+def compute_semantic_ios(masks_binary, labels, obj_sim, mem_n_classes, use_semantic=True, rank_score=True):
+    n_masks = masks_binary.shape[0]
+    masks = masks_binary.reshape(n_masks, -1).to(dtype=torch.float32)
+    ios = torch.zeros((n_masks,), device=masks_binary.device, dtype=torch.float32)
+
+    for cat_ind in range(mem_n_classes):
+        select_idxs = (labels == cat_ind)
+        _masks = masks[select_idxs]
+        _obj_sim = obj_sim[select_idxs][:, select_idxs]
+        n_cat = _masks.shape[0]
+        if n_cat == 0:
+            continue
+        pos_num = _masks.sum(dim=-1).to(dtype=torch.float32)
+        inter_num = _masks @ _masks.t()
+        inter_num.fill_diagonal_(0.0)
+        if rank_score:
+            inter_num = inter_num * _obj_sim
+        _ios = (inter_num / pos_num[:, None])
+        if use_semantic:
+            _ios = _ios * _obj_sim
+        _ios = _ios.max(dim=-1)[0]
+        ios[select_idxs] += _ios
+    return ios
+
+def compute_sim_global_avg(tar_feat, masks_feat_size_bool, mem_feats_ins_avg, softmax=False, temp=1.0, ret_feats=False):
+    masks = masks_feat_size_bool.to(dtype=tar_feat.dtype)
+    tar_avg_feats = (masks @ tar_feat) / masks.sum(dim=-1, keepdim=True)
+    tar_avg_feats = F.normalize(tar_avg_feats, p=2, dim=-1)
+
+    mem_feats_avg = mem_feats_ins_avg.mean(dim=1)
+    mem_feats_avg = F.normalize(mem_feats_avg, p=2, dim=-1)
+
+    sim_avg = tar_avg_feats @ mem_feats_avg.t()
+    if softmax:
+        sim_avg = F.softmax(sim_avg / temp, dim=-1)
+    else:
+        sim_avg = sim_avg / temp
+    if not ret_feats:
+        return sim_avg
+    else:
+        return sim_avg, tar_avg_feats
+
+def compute_sim_global_avg_with_neg(tar_feat, masks_feat_size_bool, mem_feats_avg, mem_feats_ins_avg_neg, mem_n_classes, sigma=1.0):
+    n_masks = masks_feat_size_bool.shape[0]
+    c = tar_feat.shape[-1]
+
+    masks = masks_feat_size_bool.to(dtype=tar_feat.dtype)
+    tar_avg_feats = (masks @ tar_feat) / masks.sum(dim=-1, keepdim=True)
+    tar_avg_feats = F.normalize(tar_avg_feats, p=2, dim=-1)
+
+    mem_feats_avg = F.normalize(mem_feats_avg, p=2, dim=-1)
+
+    mem_feats_ins_avg_neg = F.normalize(mem_feats_ins_avg_neg, p=2, dim=-1).reshape(-1, c)
+
+    sim_pos = tar_avg_feats @ mem_feats_avg.t()
+    sim_pos = sim_pos.clamp(min=0.0)
+
+    sim_neg = tar_avg_feats @ mem_feats_ins_avg_neg.t()
+    sim_neg = sim_neg.clamp(min=0.0)
+    sim_neg = sim_neg.reshape(n_masks, mem_n_classes, -1)
+    sim_neg, max_inds = sim_neg.max(dim=-1)
+
+    sim_final = sim_pos * torch.exp(-1.0 * (sim_neg - sim_pos).clamp(min=0.0) / sigma)
+    return sim_final
 
