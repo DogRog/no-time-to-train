@@ -42,6 +42,6 @@ def sample_small_dataset(json_file, output_path, size=100):
 if __name__ == "__main__":
     sample_small_dataset(
         f"./data/coco/annotations/instances_val2017.json",
-        f"./data/coco/annotations_refsam2/val2017_500.json",
-        size=500
+        f"./data/coco/annotations_refsam2/val2017_1000.json",
+        size=1000
     )

@@ -52,7 +52,7 @@ dependencies = [
     "mmengine>=0.10.5",
     "nvitop>=1.3.2",
     "nvidia-ml-py>=12.535.161",
-    "sam2 @ git+https://github.com/facebookresearch/segment-anything-2.git"
+    "tidecv>=0.3.5"
 ]
 
 [project.optional-dependencies]
