@@ -33,15 +33,22 @@ def collect_results_cpu(result_part, size=None, tmpdir=None):
     if tmpdir is None:
         MAX_LEN = 512
         # 32 is whitespace
+        if torch.cuda.is_available():
+            device = 'cuda'
+        elif torch.backends.mps.is_available():
+            device = 'mps'
+        else:
+            device = 'cpu'
+            
         dir_tensor = torch.full((MAX_LEN, ),
                                 32,
                                 dtype=torch.uint8,
-                                device='cuda')
+                                device=device)
         if rank == 0:
             mmengine.mkdir_or_exist('/tmp/.mydist_test')
             tmpdir = tempfile.mkdtemp(dir='/tmp/.mydist_test')
             tmpdir = torch.tensor(
-                bytearray(tmpdir.encode()), dtype=torch.uint8, device='cuda')
+                bytearray(tmpdir.encode()), dtype=torch.uint8, device=device)
             dir_tensor[:len(tmpdir)] = tmpdir
         dist.broadcast(dir_tensor, 0)
         tmpdir = dir_tensor.cpu().numpy().tobytes().decode().rstrip()

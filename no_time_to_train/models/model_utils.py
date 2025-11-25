@@ -57,11 +57,7 @@ def build_encoder(encoder_cfg, encoder_ckpt_path, encoder_predefined_cfgs, devic
         )
 
     hf_model_id = _resolve_encoder_checkpoint(hf_model_id, encoder_defaults)
-
-    if "dinov3" in encoder_name:
-        encoder = AutoModel.from_pretrained(hf_model_id)
-    else:
-        encoder = AutoModel.from_pretrained(hf_model_id)
+    encoder = AutoModel.from_pretrained(hf_model_id)
 
     encoder.to(device)
     encoder.eval()

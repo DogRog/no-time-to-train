@@ -18,9 +18,24 @@ from no_time_to_train.models.matching_baseline_utils import (
     compute_sim_global_avg,
     compute_sim_global_avg_with_neg
 )
-from no_time_to_train.models.model_utils import build_encoder, concat_all_gather
+from no_time_to_train.models.model_utils import (
+    build_encoder, 
+    concat_all_gather
+)
 
 encoder_predefined_cfgs = {
+    "dinov2_small": dict(
+        img_size=518,
+        patch_size=14,
+        init_values=1e-5,
+        ffn_layer='mlp',
+        block_chunks=0,
+        qkv_bias=True,
+        proj_bias=True,
+        ffn_bias=True,
+        feat_dim=384,
+        hf_model_name="facebook/dinov2-small"
+    ),
     "dinov2_large": dict(
         img_size=518,
         patch_size=14,
@@ -33,12 +48,12 @@ encoder_predefined_cfgs = {
         feat_dim=1024,
         hf_model_name="facebook/dinov2-large"
     ),
-    "dinov3_vitl16": dict(
+    "dinov3_large": dict(
         img_size=518,
         patch_size=16,
-        init_values=1e-5,
+        # init_values=1e-5,
         ffn_layer='mlp',
-        block_chunks=0,
+        # block_chunks=0,
         qkv_bias=True,
         proj_bias=True,
         ffn_bias=True,
@@ -48,8 +63,15 @@ encoder_predefined_cfgs = {
 }
 
 
-
 class Sam2MatchingBaselineNoAMG(nn.Module):
+    """
+    SAM2-based Matching Baseline without Automatic Mask Generation (AMG).
+
+    This model uses SAM2 for mask prediction and a separate encoder (e.g., DINOv2)
+    for feature extraction and matching against a memory bank of reference examples.
+    It supports few-shot segmentation tasks by building a memory bank from support images
+    and then segmenting target images based on feature similarity.
+    """
     def __init__(
         self,
         sam2_cfg_file,
@@ -64,6 +86,23 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         online_vis=False,
         vis_thr=0.5
     ):
+        """
+        Initialize the Sam2MatchingBaselineNoAMG model.
+
+        Args:
+            sam2_cfg_file (str): Path to the SAM2 configuration file.
+            sam2_ckpt_path (str): Path to the SAM2 checkpoint file.
+            sam2_infer_cfgs (dict): Configuration dictionary for SAM2 inference parameters
+                                    (e.g., points_per_side, iou_thr, etc.).
+            encoder_cfg (str): Configuration key for the encoder (e.g., "dinov2_large").
+            encoder_ckpt_path (str): Path to the encoder checkpoint file.
+            memory_bank_cfg (dict): Configuration dictionary for the memory bank.
+            dataset_name (str, optional): Name of the dataset. Defaults to 'coco'.
+            dataset_imgs_path (str, optional): Path to dataset images. Defaults to None.
+            class_names (list, optional): List of class names. Defaults to None.
+            online_vis (bool, optional): Whether to enable online visualization. Defaults to False.
+            vis_thr (float, optional): Visualization threshold. Defaults to 0.5.
+        """
         super(Sam2MatchingBaselineNoAMG, self).__init__()
 
         print("Model Parameters:")
@@ -93,11 +132,20 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
 
         # Models
         self.sam_transform = Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-        self.predictor = build_sam2_video_predictor(sam2_cfg_file, sam2_ckpt_path)
+        
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+        print(f"Using device: {device}")
+
+        self.predictor = build_sam2_video_predictor(sam2_cfg_file, sam2_ckpt_path, device=device)
         self.sam_img_size = 1024
 
         self.encoder, self.encoder_img_size, self.encoder_patch_size, encoder_hw = build_encoder(
-            encoder_cfg, encoder_ckpt_path, encoder_predefined_cfgs, self.predictor.device
+            encoder_cfg, encoder_ckpt_path, encoder_predefined_cfgs, device
         )
         self.encoder_h, self.encoder_w = encoder_hw, encoder_hw
         self.encoder_dim = self.encoder.config.hidden_size
@@ -109,22 +157,33 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         assert memory_bank_cfg.pop("enable")
         memory_bank_cfg["feat_shape"] = (self.encoder_h * self.encoder_w, self.encoder_dim)
         
-        self.memory_bank = MemoryBank(memory_bank_cfg, self.kmeans_k, self.n_pca_components)
+        self.memory_bank = MemoryBank(memory_bank_cfg, self.kmeans_k, self.n_pca_components).to(device)
         
         if self.with_negative_refs:
             neg_cfg = copy.deepcopy(memory_bank_cfg)
             neg_cfg["length"] = memory_bank_cfg.get("length_negative")
-            self.memory_bank_neg = MemoryBank(neg_cfg, self.kmeans_k, self.n_pca_components)
+            self.memory_bank_neg = MemoryBank(neg_cfg, self.kmeans_k, self.n_pca_components).to(device)
         else:
             self.memory_bank_neg = None
 
         self._reset()
 
     def _reset(self):
+        """Reset the backbone features and high-resolution features."""
         self.backbone_features = None
         self.backbone_hr_features = None
 
     def _forward_encoder(self, imgs):
+        """
+        Forward pass through the encoder to extract features.
+
+        Args:
+            imgs (torch.Tensor): Input images tensor of shape (B, C, H, W).
+
+        Returns:
+            torch.Tensor: Extracted features of shape (B, N, D), where N is the number of patches
+                          and D is the feature dimension.
+        """
         assert len(imgs.shape) == 4
         n_skip_tokens = 1 + getattr(self.encoder.config, "num_register_tokens", 0)
         outputs = self.encoder(pixel_values=imgs, output_hidden_states=False)
@@ -134,6 +193,21 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         return feats
 
     def _forward_sam_decoder(self, backbone_features, sparse_embeddings, dense_embeddings, backbone_hr_features, multimask_output=True):
+        """
+        Forward pass through the SAM2 mask decoder.
+
+        Args:
+            backbone_features (torch.Tensor): Image features from the backbone.
+            sparse_embeddings (torch.Tensor): Sparse prompt embeddings (points, boxes).
+            dense_embeddings (torch.Tensor): Dense prompt embeddings (masks).
+            backbone_hr_features (list): High-resolution features from the backbone.
+            multimask_output (bool, optional): Whether to output multiple masks. Defaults to True.
+
+        Returns:
+            tuple: A tuple containing:
+                - low_res_masks (torch.Tensor): Predicted low-resolution masks.
+                - scores (torch.Tensor): IoU scores for the predicted masks.
+        """
         B = backbone_features.shape[0]
         device = backbone_features.device
         (
@@ -166,6 +240,17 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         return low_res_masks, scores
 
     def _compute_masks(self, backbone_features, backbone_hr_features, point_inputs):
+        """
+        Compute masks given backbone features and point inputs.
+
+        Args:
+            backbone_features (torch.Tensor): Image features.
+            backbone_hr_features (list): High-resolution features.
+            point_inputs (dict): Dictionary containing 'point_coords' and 'point_labels'.
+
+        Returns:
+            tuple: (low_res_masks, scores)
+        """
         B = backbone_features.size(0)
         sam_point_coords = point_inputs["point_coords"]
         sam_point_labels = point_inputs["point_labels"]
@@ -185,6 +270,16 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         return low_res_masks, scores
 
     def _get_grid_points(self, sam_input_size, device):
+        """
+        Generate a grid of query points for SAM.
+
+        Args:
+            sam_input_size (int): Input size for SAM.
+            device (torch.device): Device to create tensors on.
+
+        Returns:
+            torch.Tensor: Grid points coordinates.
+        """
         x, y = torch.meshgrid(
             torch.linspace(0, sam_input_size-1, self.points_per_side),
             torch.linspace(0, sam_input_size-1, self.points_per_side),
@@ -195,6 +290,20 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         return query_points.to(device=device)
 
     def _forward_sam(self, imgs, precomputed_points=None, point_normed=True):
+        """
+        Run SAM inference on images using grid points or precomputed points.
+
+        Args:
+            imgs (torch.Tensor): Input images.
+            precomputed_points (torch.Tensor, optional): Precomputed points. Defaults to None.
+            point_normed (bool, optional): Whether points are normalized. Defaults to True.
+
+        Returns:
+            tuple: (lr_masks_all, scores_all, points_all)
+                - lr_masks_all: All predicted low-resolution masks.
+                - scores_all: Scores for all masks.
+                - points_all: Points used for prediction.
+        """
         assert len(imgs.shape) == 4
         assert self.backbone_features is None
         assert self.backbone_hr_features is None
@@ -261,6 +370,16 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         return lr_masks_all, scores_all, points_all
 
     def forward_fill_memory(self, input_dicts, is_positive):
+        """
+        Extract features from support images and fill the memory bank.
+
+        Args:
+            input_dicts (list): List of input dictionaries containing support images and masks.
+            is_positive (bool): Whether to fill the positive memory bank or negative memory bank.
+
+        Returns:
+            dict: Empty dictionary.
+        """
         with torch.inference_mode():
             assert len(input_dicts) == 1
 
@@ -305,6 +424,15 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
             return {}
 
     def forward_vis_memory(self, input_dicts):
+        """
+        Visualize the contents of the memory bank.
+
+        Args:
+            input_dicts (list): List of input dictionaries.
+
+        Returns:
+            dict: Visualization results.
+        """
         return vis_memory(
             input_dicts, 
             self.memory_bank, 
@@ -318,6 +446,18 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         )
 
     def _extract_target_features(self, tar_img, device):
+        """
+        Extract features from the target image using the encoder.
+
+        Args:
+            tar_img (torch.Tensor): Target image.
+            device (torch.device): Device.
+
+        Returns:
+            tuple: (tar_feat, tar_img)
+                - tar_feat: Extracted features.
+                - tar_img: Target image tensor.
+        """
         tar_img = tar_img.to(device=device)
         tar_img_encoder = F.interpolate(
             tar_img.unsqueeze(dim=0),
@@ -329,6 +469,18 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         return tar_feat, tar_img
 
     def _process_sam_masks(self, lr_masks, tar_feat):
+        """
+        Process SAM masks and align them with target features.
+
+        Args:
+            lr_masks (torch.Tensor): Low-resolution masks from SAM.
+            tar_feat (torch.Tensor): Target image features.
+
+        Returns:
+            tuple: (masks_feat_size_bool, tar_feat_spatial)
+                - masks_feat_size_bool: Boolean masks resized to feature size.
+                - tar_feat_spatial: Spatially arranged target features.
+        """
         n_masks = lr_masks.shape[0]
         masks_feat_size_bool = lr_masks > 0
         masks_feat_size_bool = masks_feat_size_bool.reshape(n_masks, -1)
@@ -345,6 +497,16 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         return masks_feat_size_bool, tar_feat_spatial
 
     def forward_test(self, input_dicts, with_negative):
+        """
+        Perform inference on target images using the memory bank.
+
+        Args:
+            input_dicts (list): List of input dictionaries containing target images.
+            with_negative (bool): Whether to use negative references.
+
+        Returns:
+            list: List of output dictionaries containing masks, bboxes, scores, and labels.
+        """
         assert len(input_dicts) == 1
         device = self.predictor.device
         
@@ -472,7 +634,28 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         self._reset()
         return [output_dict]
 
+    def postprocess_memory(self):
+        """
+        Post-process the memory bank.
+        """
+        self.memory_bank.postprocess()
+
+    def postprocess_memory_negative(self):
+        """
+        Post-process the negative memory bank.
+        """
+        self.memory_bank_neg.postprocess()
+
     def forward(self, input_dicts):
+        """
+        Main forward method dispatching to specific modes.
+
+        Args:
+            input_dicts (list): List of input dictionaries.
+
+        Returns:
+            Any: Result depending on the data_mode (fill_memory, vis_memory, test, etc.).
+        """
         data_mode = input_dicts[0].pop("data_mode", None)
         assert data_mode is not None
         assert not self.training

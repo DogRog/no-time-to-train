@@ -68,6 +68,9 @@ def get_dataset(dataset_cfg, stage):
         raise NotImplementedError("Unrecognized dataset %s" % dataset_name)
 
 
+def identity_collate_fn(batch):
+    return batch
+
 class Sam2MatcherLightningModel(LightningModule):
     def __init__(
         self,
@@ -81,7 +84,7 @@ class Sam2MatcherLightningModel(LightningModule):
         # data configurations
         self.dataset_cfgs   = dataset_cfgs
         self.data_load_cfgs = data_load_cfgs
-        self.workers        = data_load_cfgs.get("workers")
+        self.workers        = int(data_load_cfgs.get("workers", 0))
 
         # HACK to allow CLI arguments to override model_cfg
         if "fill_memory.root" in dataset_cfgs:
@@ -101,6 +104,8 @@ class Sam2MatcherLightningModel(LightningModule):
             model_cfg["memory_bank_cfg"]["length"] = int(model_cfg.pop("memory_bank_cfg.length"))
         if "memory_bank_cfg.category_num" in model_cfg:
             model_cfg["memory_bank_cfg"]["category_num"] = int(model_cfg.pop("memory_bank_cfg.category_num"))
+        if "sam2_infer_cfgs.testing_point_bs" in model_cfg:
+            model_cfg["sam2_infer_cfgs"]["testing_point_bs"] = int(model_cfg.pop("sam2_infer_cfgs.testing_point_bs"))
         if "dataset_name" in model_cfg:
             model_cfg["dataset_name"] = model_cfg.pop("dataset_name")
         if "test.imgs_path" in model_cfg:
@@ -214,5 +219,5 @@ class Sam2MatcherLightningModel(LightningModule):
             num_workers=self.workers,
             pin_memory=True,
             drop_last=False,
-            collate_fn=lambda batch: batch
+            collate_fn=identity_collate_fn
         )

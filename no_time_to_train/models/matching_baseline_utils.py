@@ -30,6 +30,17 @@ from sam2.automatic_mask_generator import (
 )
 
 def fast_l2(x, y, sqrt=True):
+    """
+    Compute L2 distances between x and y in the last dimension.
+
+    Args:
+        x (torch.Tensor): Tensor of shape (..., D).
+        y (torch.Tensor): Tensor of shape (..., D).
+        sqrt (bool, optional): Whether to take the square root of the distance. Defaults to True.
+
+    Returns:
+        torch.Tensor: L2 distances.
+    """
     # compute L2 distances between x, y in dim -2
 
     assert len(x.shape) == len(y.shape)
@@ -45,6 +56,17 @@ def fast_l2(x, y, sqrt=True):
 
 
 def kmeans(feats, k, n_iter=100):
+    """
+    Perform K-means clustering on features.
+
+    Args:
+        feats (torch.Tensor): Input features of shape (N, C).
+        k (int): Number of clusters.
+        n_iter (int, optional): Number of iterations. Defaults to 100.
+
+    Returns:
+        torch.Tensor: Cluster centers of shape (k, C).
+    """
     assert len(feats.shape) == 2
 
     device = feats.device
@@ -64,6 +86,18 @@ def kmeans(feats, k, n_iter=100):
 
 
 def kmeans_decouple(feats, feats_fore, k, n_iter=100):
+    """
+    Perform decoupled K-means clustering.
+
+    Args:
+        feats (torch.Tensor): All features.
+        feats_fore (torch.Tensor): Foreground features used for initial clustering.
+        k (int): Number of clusters.
+        n_iter (int, optional): Number of iterations. Defaults to 100.
+
+    Returns:
+        torch.Tensor: Cluster centers.
+    """
     assert len(feats.shape) == 2
 
     device = feats.device
@@ -93,6 +127,15 @@ def kmeans_decouple(feats, feats_fore, k, n_iter=100):
 
 
 def compute_foundpose(feats: torch.Tensor, masks: torch.Tensor, k_kmeans: int, n_pca: int):
+    """
+    Compute FoundPose features using PCA and K-means.
+
+    Args:
+        feats (torch.Tensor): Input features.
+        masks (torch.Tensor): Masks indicating foreground.
+        k_kmeans (int): Number of K-means clusters.
+        n_pca (int): Number of PCA components.
+    """
     # Reference: https://github.com/facebookresearch/foundpose/
 
     device = feats.device
@@ -143,6 +186,23 @@ def compute_foundpose(feats: torch.Tensor, masks: torch.Tensor, k_kmeans: int, n
 
 
 def vis_kmeans(ref_imgs, ref_masks_ori, ref_cat_ind, ref_feats, ref_masks, feats_centers, encoder_shape_info, device, transparency):
+    """
+    Visualize K-means clustering results on reference images.
+
+    Args:
+        ref_imgs (torch.Tensor): Reference images.
+        ref_masks_ori (torch.Tensor): Original reference masks.
+        ref_cat_ind (int): Category index.
+        ref_feats (torch.Tensor): Reference features.
+        ref_masks (torch.Tensor): Reference masks.
+        feats_centers (torch.Tensor): Feature centers from K-means.
+        encoder_shape_info (dict): Encoder shape information (height, width, patch_size).
+        device (torch.device): Device.
+        transparency (float): Transparency for visualization.
+
+    Returns:
+        torch.Tensor: Visualized image.
+    """
     encoder_h = encoder_shape_info.get("height")
     encoder_w = encoder_shape_info.get("width")
     encoder_patch_size = encoder_shape_info.get("patch_size")
@@ -191,6 +251,24 @@ def vis_kmeans(ref_imgs, ref_masks_ori, ref_cat_ind, ref_feats, ref_masks, feats
 
 
 def vis_pca(ref_imgs, ref_masks_ori, ref_cat_ind, ref_feats, ref_masks, pca_means, pca_components, encoder_shape_info, device, transparency):
+    """
+    Visualize PCA results on reference images.
+
+    Args:
+        ref_imgs (torch.Tensor): Reference images.
+        ref_masks_ori (torch.Tensor): Original reference masks.
+        ref_cat_ind (int): Category index.
+        ref_feats (torch.Tensor): Reference features.
+        ref_masks (torch.Tensor): Reference masks.
+        pca_means (torch.Tensor): PCA means.
+        pca_components (torch.Tensor): PCA components.
+        encoder_shape_info (dict): Encoder shape information.
+        device (torch.device): Device.
+        transparency (float): Transparency.
+
+    Returns:
+        torch.Tensor: Visualized image.
+    """
     encoder_h = encoder_shape_info.get("height")
     encoder_w = encoder_shape_info.get("width")
     encoder_patch_size = encoder_shape_info.get("patch_size")
@@ -233,6 +311,9 @@ def vis_pca(ref_imgs, ref_masks_ori, ref_cat_ind, ref_feats, ref_masks, pca_mean
 
 
 class SAM2AutomaticMaskGenerator_MatchingBaseline(SAM2AutomaticMaskGenerator):
+    """
+    SAM2 Automatic Mask Generator adapted for Matching Baseline.
+    """
     @torch.no_grad()
     def generate(
         self,
@@ -242,6 +323,19 @@ class SAM2AutomaticMaskGenerator_MatchingBaseline(SAM2AutomaticMaskGenerator):
         select_box=None,
         select_mask_input=None
     ):
+        """
+        Generate masks for the given image.
+
+        Args:
+            image (np.ndarray): Input image.
+            select_point_coords (np.ndarray, optional): Point coordinates. Defaults to None.
+            select_point_labels (np.ndarray, optional): Point labels. Defaults to None.
+            select_box (np.ndarray, optional): Bounding box. Defaults to None.
+            select_mask_input (np.ndarray, optional): Mask input. Defaults to None.
+
+        Returns:
+            tuple: (masks, ious, low_res_masks)
+        """
         mask_data = self._generate_masks(
             image, select_point_coords, select_point_labels, select_box, select_mask_input
         )
@@ -257,6 +351,19 @@ class SAM2AutomaticMaskGenerator_MatchingBaseline(SAM2AutomaticMaskGenerator):
         select_box,
         select_mask_input
     ):
+        """
+        Internal method to generate masks.
+
+        Args:
+            image (np.ndarray): Input image.
+            select_point_coords (np.ndarray): Point coordinates.
+            select_point_labels (np.ndarray): Point labels.
+            select_box (np.ndarray): Bounding box.
+            select_mask_input (np.ndarray): Mask input.
+
+        Returns:
+            MaskData: Generated mask data.
+        """
         orig_size = image.shape[:2]
         crop_box = [0, 0, orig_size[-1], orig_size[-2]]
 
@@ -283,6 +390,22 @@ class SAM2AutomaticMaskGenerator_MatchingBaseline(SAM2AutomaticMaskGenerator):
         select_box,
         select_mask_input
     ):
+        """
+        Process a single crop of the image.
+
+        Args:
+            image (np.ndarray): Image crop.
+            crop_box (list): Crop box coordinates [x0, y0, x1, y1].
+            crop_layer_idx (int): Index of the crop layer.
+            orig_size (tuple): Original image size.
+            select_point_coords (np.ndarray): Point coordinates.
+            select_point_labels (np.ndarray): Point labels.
+            select_box (np.ndarray): Bounding box.
+            select_mask_input (np.ndarray): Mask input.
+
+        Returns:
+            MaskData: Mask data for the crop.
+        """
         x0, y0, x1, y1 = crop_box
         cropped_im_size = (int(y1-y0), int(x1-x0))
 
@@ -317,6 +440,19 @@ class SAM2AutomaticMaskGenerator_MatchingBaseline(SAM2AutomaticMaskGenerator):
         orig_size,
         normalize=False,
     ) -> MaskData:
+        """
+        Process a batch of points.
+
+        Args:
+            points (np.ndarray): Points to process.
+            im_size (tuple): Image size.
+            crop_box (list): Crop box.
+            orig_size (tuple): Original image size.
+            normalize (bool, optional): Whether to normalize coordinates. Defaults to False.
+
+        Returns:
+            MaskData: Mask data for the batch.
+        """
         orig_h, orig_w = orig_size
 
         # Run model on this batch
@@ -400,7 +536,18 @@ class SAM2AutomaticMaskGenerator_MatchingBaseline(SAM2AutomaticMaskGenerator):
 import torch.nn as nn
 
 class MemoryBank(nn.Module):
+    """
+    Memory Bank for storing and retrieving features.
+    """
     def __init__(self, config, kmeans_k, n_pca_components):
+        """
+        Initialize the MemoryBank.
+
+        Args:
+            config (dict): Configuration dictionary.
+            kmeans_k (int): Number of K-means clusters.
+            n_pca_components (int): Number of PCA components.
+        """
         super().__init__()
         self.n_classes = config.get("category_num")
         self.length = config.get("length")
@@ -425,6 +572,9 @@ class MemoryBank(nn.Module):
         self.ready = False
 
     def postprocess(self):
+        """
+        Post-process the memory bank features (compute averages, covariances, K-means, PCA).
+        """
         # Compute class-wise average features
         c = self.feats.shape[-1]
 
@@ -504,6 +654,23 @@ from PIL import Image
 from no_time_to_train.dataset.visualization import vis_coco
 
 def vis_memory(input_dicts, memory_bank, encoder, encoder_transform, encoder_img_size, encoder_h, encoder_w, encoder_patch_size, device):
+    """
+    Visualize the memory bank contents.
+
+    Args:
+        input_dicts (list): Input dictionaries.
+        memory_bank (MemoryBank): Memory bank instance.
+        encoder (nn.Module): Encoder model.
+        encoder_transform (callable): Encoder transform.
+        encoder_img_size (int): Encoder image size.
+        encoder_h (int): Encoder height.
+        encoder_w (int): Encoder width.
+        encoder_patch_size (int): Encoder patch size.
+        device (torch.device): Device.
+
+    Returns:
+        dict: Empty dictionary.
+    """
     assert len(input_dicts) == 1
     assert memory_bank.fill_counts[0].item() > 0
     assert memory_bank.n_pca_components == 3  # RGB
@@ -577,6 +744,19 @@ def vis_memory(input_dicts, memory_bank, encoder, encoder_transform, encoder_img
     return {}
 
 def vis_results_online(output_dict, tar_anns_by_cat, sam_img_size, score_thr=0.65, show_scores=False, dataset_name=None, dataset_imgs_path=None, class_names=None):
+    """
+    Visualize inference results online.
+
+    Args:
+        output_dict (dict): Output dictionary from the model.
+        tar_anns_by_cat (dict): Target annotations by category.
+        sam_img_size (int): SAM image size.
+        score_thr (float, optional): Score threshold. Defaults to 0.65.
+        show_scores (bool, optional): Whether to show scores. Defaults to False.
+        dataset_name (str, optional): Dataset name. Defaults to None.
+        dataset_imgs_path (str, optional): Dataset images path. Defaults to None.
+        class_names (list, optional): Class names. Defaults to None.
+    """
     scores = output_dict["scores"].cpu().numpy()
     masks_pred = output_dict["binary_masks"].cpu().numpy()
     bboxes = output_dict["bboxes"].cpu().numpy()
@@ -642,6 +822,20 @@ def vis_results_online(output_dict, tar_anns_by_cat, sam_img_size, score_thr=0.6
     )
 
 def compute_semantic_ios(masks_binary, labels, obj_sim, mem_n_classes, use_semantic=True, rank_score=True):
+    """
+    Compute semantic Intersection over Self (IoS) scores.
+
+    Args:
+        masks_binary (torch.Tensor): Binary masks.
+        labels (torch.Tensor): Labels.
+        obj_sim (torch.Tensor): Object similarity matrix.
+        mem_n_classes (int): Number of memory classes.
+        use_semantic (bool, optional): Whether to use semantic similarity. Defaults to True.
+        rank_score (bool, optional): Whether to rank scores. Defaults to True.
+
+    Returns:
+        torch.Tensor: IoS scores.
+    """
     n_masks = masks_binary.shape[0]
     masks = masks_binary.reshape(n_masks, -1).to(dtype=torch.float32)
     ios = torch.zeros((n_masks,), device=masks_binary.device, dtype=torch.float32)
@@ -666,6 +860,20 @@ def compute_semantic_ios(masks_binary, labels, obj_sim, mem_n_classes, use_seman
     return ios
 
 def compute_sim_global_avg(tar_feat, masks_feat_size_bool, mem_feats_ins_avg, softmax=False, temp=1.0, ret_feats=False):
+    """
+    Compute global average similarity between target features and memory features.
+
+    Args:
+        tar_feat (torch.Tensor): Target features.
+        masks_feat_size_bool (torch.Tensor): Mask booleans resized to feature size.
+        mem_feats_ins_avg (torch.Tensor): Memory features instance average.
+        softmax (bool, optional): Whether to apply softmax. Defaults to False.
+        temp (float, optional): Temperature for softmax. Defaults to 1.0.
+        ret_feats (bool, optional): Whether to return target average features. Defaults to False.
+
+    Returns:
+        torch.Tensor or tuple: Similarity scores, or (similarity scores, target average features).
+    """
     masks = masks_feat_size_bool.to(dtype=tar_feat.dtype)
     tar_avg_feats = (masks @ tar_feat) / masks.sum(dim=-1, keepdim=True)
     tar_avg_feats = F.normalize(tar_avg_feats, p=2, dim=-1)
@@ -684,6 +892,20 @@ def compute_sim_global_avg(tar_feat, masks_feat_size_bool, mem_feats_ins_avg, so
         return sim_avg, tar_avg_feats
 
 def compute_sim_global_avg_with_neg(tar_feat, masks_feat_size_bool, mem_feats_avg, mem_feats_ins_avg_neg, mem_n_classes, sigma=1.0):
+    """
+    Compute global average similarity with negative references.
+
+    Args:
+        tar_feat (torch.Tensor): Target features.
+        masks_feat_size_bool (torch.Tensor): Mask booleans.
+        mem_feats_avg (torch.Tensor): Memory features average.
+        mem_feats_ins_avg_neg (torch.Tensor): Negative memory features instance average.
+        mem_n_classes (int): Number of memory classes.
+        sigma (float, optional): Sigma parameter. Defaults to 1.0.
+
+    Returns:
+        torch.Tensor: Final similarity scores.
+    """
     n_masks = masks_feat_size_bool.shape[0]
     c = tar_feat.shape[-1]
 

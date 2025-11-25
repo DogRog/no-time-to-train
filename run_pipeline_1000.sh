@@ -19,6 +19,7 @@ RESULTS_DIR=work_dirs/few_shot_results_1000
 SHOTS=10
 SEED=33
 GPUS=1 
+ACCELERATOR="mps"
 
 mkdir -p $RESULTS_DIR
 FILENAME=few_shot_${SHOTS}shot_seed${SEED}.pkl
@@ -41,7 +42,8 @@ uv run run_lightning.py test --config $CONFIG \
                               --model.init_args.dataset_cfgs.fill_memory.memory_length $SHOTS \
                               --model.init_args.dataset_cfgs.fill_memory.class_split $CLASS_SPLIT \
                               --trainer.logger.save_dir ${RESULTS_DIR}/ \
-                              --trainer.devices $GPUS
+                              --trainer.devices $GPUS \
+                              --trainer.accelerator $ACCELERATOR
 
 # 3. Post-process memory bank
 echo "Post-processing memory..."
@@ -50,7 +52,8 @@ uv run run_lightning.py test --config $CONFIG \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
                               --ckpt_path ${RESULTS_DIR}/memory.ckpt \
                               --out_path ${RESULTS_DIR}/memory_postprocessed.ckpt \
-                              --trainer.devices 1
+                              --trainer.devices 1 \
+                              --trainer.accelerator $ACCELERATOR
 
 # 4. Inference on target images (using the 1000 image subset)
 echo "Running inference on 1000 image subset..."
@@ -64,6 +67,7 @@ uv run run_lightning.py test --config $CONFIG  \
                               --model.init_args.model_cfg.sam2_infer_cfgs.testing_point_bs 256 \
                               --model.init_args.data_load_cfgs.workers 4 \
                               --trainer.logger.save_dir ${RESULTS_DIR}/ \
-                              --trainer.devices $GPUS
+                              --trainer.devices $GPUS \
+                              --trainer.accelerator $ACCELERATOR
 
 echo "Done! Results are in $RESULTS_DIR"
