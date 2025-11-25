@@ -42,3 +42,4 @@ notebooks/videos/*
 .python-version
 uv.lock
 test.py
+test.ipynb

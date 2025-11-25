@@ -15,11 +15,11 @@ fi
 # Define variables
 CONFIG=./no_time_to_train/new_exps/coco_fewshot_10shot_Sam2S.yaml
 CLASS_SPLIT="few_shot_classes"
-RESULTS_DIR=work_dirs/few_shot_results_1000
+RESULTS_DIR=work_dirs/few_shot_results_500
 SHOTS=10
 SEED=33
 GPUS=1 
-ACCELERATOR="mps"
+ACCELERATOR="mps"  # Change to "cuda" if using NVIDIA GPUs
 
 mkdir -p $RESULTS_DIR
 FILENAME=few_shot_${SHOTS}shot_seed${SEED}.pkl
@@ -55,8 +55,8 @@ uv run run_lightning.py test --config $CONFIG \
                               --trainer.devices 1 \
                               --trainer.accelerator $ACCELERATOR
 
-# 4. Inference on target images (using the 1000 image subset)
-echo "Running inference on 1000 image subset..."
+# 4. Inference on target images (using the 500 image subset)
+echo "Running inference on 500 image subset..."
 uv run run_lightning.py test --config $CONFIG  \
                               --ckpt_path ${RESULTS_DIR}/memory_postprocessed.ckpt \
                               --model.init_args.test_mode test \
@@ -64,8 +64,6 @@ uv run run_lightning.py test --config $CONFIG  \
                               --model.init_args.model_cfg.dataset_name $CLASS_SPLIT \
                               --model.init_args.dataset_cfgs.test.class_split $CLASS_SPLIT \
                               --model.init_args.dataset_cfgs.test.json_file ./data/coco/annotations_refsam2/val2017_1000.json \
-                              --model.init_args.model_cfg.sam2_infer_cfgs.testing_point_bs 256 \
-                              --model.init_args.data_load_cfgs.workers 4 \
                               --trainer.logger.save_dir ${RESULTS_DIR}/ \
                               --trainer.devices $GPUS \
                               --trainer.accelerator $ACCELERATOR

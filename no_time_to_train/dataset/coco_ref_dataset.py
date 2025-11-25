@@ -538,6 +538,11 @@ class COCORefTestDataset(COCORefTrainDataset):
             self.coco.createIndex()
         else:
             self.coco = COCO(json_file)
+        
+        if 'info' not in self.coco.dataset:
+            self.coco.dataset['info'] = {}
+        if 'licenses' not in self.coco.dataset:
+            self.coco.dataset['licenses'] = []
 
         self.root = root
         self.img_ids = list(self.coco.imgs.keys())
