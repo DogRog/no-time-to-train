@@ -34,10 +34,12 @@ encoder_predefined_cfgs = {
         proj_bias=True,
         ffn_bias=True,
         feat_dim=384,
-        hf_model_name="facebook/dinov2-small"
+        hf_model_name="facebook/dinov2-small",
+        layer_index=-1,
+        normalize_feat=False
     ),
     "dinov2_large": dict(
-        img_size=518,
+        img_size=518, # 37×14=518
         patch_size=14,
         init_values=1e-5,
         ffn_layer='mlp',
@@ -46,10 +48,12 @@ encoder_predefined_cfgs = {
         proj_bias=True,
         ffn_bias=True,
         feat_dim=1024,
-        hf_model_name="facebook/dinov2-large"
+        hf_model_name="facebook/dinov2-large",
+        layer_index=-1,
+        normalize_feat=False
     ),
     "dinov3_large": dict(
-        img_size=518,
+        img_size=592, # 37×16=592
         patch_size=16,
         # init_values=1e-5,
         ffn_layer='mlp',
@@ -58,7 +62,9 @@ encoder_predefined_cfgs = {
         proj_bias=True,
         ffn_bias=True,
         feat_dim=1024,
-        hf_model_name="facebook/dinov3-vitl16-pretrain-lvd1689m"
+        hf_model_name="facebook/dinov3-vitl16-pretrain-lvd1689m",
+        layer_index=-1,
+        normalize_feat=False
     )
 }
 
@@ -147,6 +153,13 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         self.encoder, self.encoder_img_size, self.encoder_patch_size, encoder_hw = build_encoder(
             encoder_cfg, encoder_ckpt_path, encoder_predefined_cfgs, device
         )
+
+        # Extract layer_index and normalize_feat
+        _enc_name = encoder_cfg.get("name")
+        _enc_defaults = encoder_predefined_cfgs.get(_enc_name, {})
+        self.layer_index = encoder_cfg.get("layer_index", _enc_defaults.get("layer_index", -1))
+        self.normalize_feat = encoder_cfg.get("normalize_feat", _enc_defaults.get("normalize_feat", False))
+
         self.encoder_h, self.encoder_w = encoder_hw, encoder_hw
         self.encoder_dim = self.encoder.config.hidden_size
         self.encoder_transform = Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
@@ -186,10 +199,21 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         """
         assert len(imgs.shape) == 4
         n_skip_tokens = 1 + getattr(self.encoder.config, "num_register_tokens", 0)
-        outputs = self.encoder(pixel_values=imgs, output_hidden_states=False)
-        seq_feats = outputs.last_hidden_state
+        
+        output_hidden_states = self.layer_index != -1
+        outputs = self.encoder(pixel_values=imgs, output_hidden_states=output_hidden_states)
+        
+        if self.layer_index == -1:
+            seq_feats = outputs.last_hidden_state
+        else:
+            seq_feats = outputs.hidden_states[self.layer_index]
+
         feats = seq_feats[:, n_skip_tokens:, :]
         feats = feats.reshape(imgs.shape[0], -1, self.encoder_dim)
+
+        if self.normalize_feat:
+            feats = F.normalize(feats, p=2, dim=-1)
+
         return feats
 
     def _forward_sam_decoder(self, backbone_features, sparse_embeddings, dense_embeddings, backbone_hr_features, multimask_output=True):
@@ -444,48 +468,69 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
             self.encoder_patch_size, 
             self.predictor.device
         )
-
     def _extract_target_features(self, tar_img, device):
         """
-        Extract features from the target image using the encoder.
-
-        Args:
-            tar_img (torch.Tensor): Target image.
-            device (torch.device): Device.
-
-        Returns:
-            tuple: (tar_feat, tar_img)
-                - tar_feat: Extracted features.
-                - tar_img: Target image tensor.
+        Extract features from the target image using the encoder, handling dynamic 
+        input sizes for both DINOv2 (p14) and DINOv3 (p16).
         """
         tar_img = tar_img.to(device=device)
+        
+        # 1. Get the model's patch size (14 for v2, 16 for v3)
+        p = self.encoder_patch_size
+        
+        # 2. Calculate new dimensions that are multiples of the patch size
+        # We do NOT force a square resize (518x518). We keep the aspect ratio.
+        h, w = tar_img.shape[-2:]
+        new_h = int(np.ceil(h / p) * p)
+        new_w = int(np.ceil(w / p) * p)
+        
+        # 3. Resize/Pad the image to these "clean" dimensions
+        # Bicubic resize is generally better for preserving features than padding
         tar_img_encoder = F.interpolate(
             tar_img.unsqueeze(dim=0),
-            size=(self.encoder_img_size, self.encoder_img_size),
-            mode="bicubic"
+            size=(new_h, new_w),
+            mode="bicubic",
+            align_corners=False,
+            antialias=True
         )
-        tar_feat = self._forward_encoder(self.encoder_transform(tar_img_encoder))
+        
+        # 4. Normalize (standard ImageNet mean/std)
+        tar_img_encoder = self.encoder_transform(tar_img_encoder)
+        
+        # 5. Forward Pass
+        tar_feat = self._forward_encoder(tar_img_encoder)
+        
+        # 6. Calculate the ACTUAL feature map dimensions
+        # This is critical. DINOv2/v3 outputs a flattened sequence (B, N, D).
+        # We must know the grid shape (H_feat, W_feat) to unflatten it correctly.
+        feat_h = new_h // p
+        feat_w = new_w // p
+        
+        # Verify the math matches the output shape
+        # (Subtract 1 for CLS token or Register tokens if present)
+        # Note: Your _forward_encoder logic handles token stripping, so tar_feat is just patches
+        assert tar_feat.shape[1] == feat_h * feat_w, \
+            f"Feature mismatch! Expected {feat_h*feat_w} tokens, got {tar_feat.shape[1]}"
+        
+        # Flatten features (B*N, D) as expected by the rest of your pipeline
         tar_feat = tar_feat.reshape(-1, self.encoder_dim)
-        return tar_feat, tar_img
+        
+        # Return features, the resized image, AND the dynamic dimensions
+        return tar_feat, tar_img, (feat_h, feat_w)
+    
 
-    def _process_sam_masks(self, lr_masks, tar_feat):
+    def _process_sam_masks(self, lr_masks, tar_feat, feat_h, feat_w):
         """
-        Process SAM masks and align them with target features.
-
-        Args:
-            lr_masks (torch.Tensor): Low-resolution masks from SAM.
-            tar_feat (torch.Tensor): Target image features.
-
-        Returns:
-            tuple: (masks_feat_size_bool, tar_feat_spatial)
-                - masks_feat_size_bool: Boolean masks resized to feature size.
-                - tar_feat_spatial: Spatially arranged target features.
+        Process SAM masks and align them with target features using DYNAMIC dimensions.
         """
         n_masks = lr_masks.shape[0]
         masks_feat_size_bool = lr_masks > 0
         masks_feat_size_bool = masks_feat_size_bool.reshape(n_masks, -1)
         
-        tar_feat_spatial = tar_feat.reshape(1, self.encoder_h, self.encoder_w, -1).permute(0, 3, 1, 2)
+        # --- CHANGED: Use dynamic feat_h, feat_w instead of self.encoder_h/w ---
+        tar_feat_spatial = tar_feat.reshape(1, feat_h, feat_w, -1).permute(0, 3, 1, 2)
+        
+        # Interpolate spatial features to mask size
         tar_feat_spatial = F.interpolate(
             tar_feat_spatial,
             size=tuple(lr_masks.shape[-2:]),
@@ -496,27 +541,29 @@ class Sam2MatchingBaselineNoAMG(nn.Module):
         
         return masks_feat_size_bool, tar_feat_spatial
 
+
     def forward_test(self, input_dicts, with_negative):
         """
-        Perform inference on target images using the memory bank.
-
-        Args:
-            input_dicts (list): List of input dictionaries containing target images.
-            with_negative (bool): Whether to use negative references.
-
-        Returns:
-            list: List of output dictionaries containing masks, bboxes, scores, and labels.
+        Perform inference on target images using the memory bank with DYNAMIC resolution.
         """
         assert len(input_dicts) == 1
         device = self.predictor.device
         
-        tar_feat, tar_img = self._extract_target_features(input_dicts[0]["target_img"], device)
+        # --- CHANGED: Unpack 3 values now ---
+        # 1. We now get the dynamic feature dimensions (feat_h, feat_w)
+        tar_feat, tar_img, (feat_h, feat_w) = self._extract_target_features(
+            input_dicts[0]["target_img"], device
+        )
         
-        # SAM inference
+        # SAM inference (SAM handles dynamic sizes natively)
         tar_img_sam = tar_img.unsqueeze(dim=0)
         lr_masks, pred_ious, query_points = self._forward_sam(self.sam_transform(tar_img_sam))
         
-        masks_feat_size_bool, tar_feat_spatial = self._process_sam_masks(lr_masks, tar_feat)
+        # --- CHANGED: Pass dynamic dims to processing ---
+        # 2. Pass feat_h and feat_w so we reshape correctly
+        masks_feat_size_bool, tar_feat_spatial = self._process_sam_masks(
+            lr_masks, tar_feat, feat_h, feat_w
+        )
 
         if not with_negative:
             sim_global, obj_feats = compute_sim_global_avg(
