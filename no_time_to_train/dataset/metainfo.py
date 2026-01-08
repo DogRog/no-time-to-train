@@ -291,4 +291,5 @@ METAINFO = {
             'snowboard', 'baseball glove', 'bottle', 'knife', 'apple', 'carrot',
             'cake', 'bed', 'laptop', 'cell phone', 'sink', 'vase', 'toothbrush'
         ),
+    'olive_diseases': ('diseases-usdB', 'Anthracnose', 'BlackScale', 'OlivePeacockSpot', 'Psyllid', 'Tuberculosis'),
 }

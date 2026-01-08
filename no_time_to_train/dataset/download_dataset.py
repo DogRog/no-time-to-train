@@ -17,7 +17,7 @@ def parse_args():
         '--save-dir',
         type=str,
         help='the dir to save dataset',
-        default='data/coco')
+        default=None)
     parser.add_argument(
         '--unzip',
         action='store_true',
@@ -32,9 +32,23 @@ def parse_args():
     return args
 
 
+def download_roboflow_dataset(url, dir):
+    f = Path(dir) / 'roboflow_dataset.zip'
+    print(f'Downloading Roboflow dataset to {f}')
+    torch.hub.download_url_to_file(url, f, progress=True)
+    print(f'Unzipping {f.name}')
+    ZipFile(f).extractall(path=dir)
+    f.unlink()
+
+
 def download(url, dir, unzip=True, delete=False, threads=1):
 
     def download_one(url, dir):
+        # Check if this is a Roboflow URL
+        if 'roboflow.com' in url:
+            download_roboflow_dataset(url, dir)
+            return
+        
         f = dir / Path(url).name
         if Path(url).is_file():
             Path(url).rename(f)
@@ -64,6 +78,11 @@ def download(url, dir, unzip=True, delete=False, threads=1):
 
 def main():
     args = parse_args()
+    if args.save_dir is None:
+        if args.dataset_name == 'olive':
+            args.save_dir = 'data/olive_diseases'
+        else:
+            args.save_dir = 'data/coco'
     path = Path(args.save_dir)
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
@@ -85,6 +104,9 @@ def main():
             'http://host.robots.ox.ac.uk/pascal/VOC/voc2007/VOCtest_06-Nov-2007.tar',  # noqa
             'http://host.robots.ox.ac.uk/pascal/VOC/voc2007/VOCdevkit_08-Jun-2007.tar',  # noqa
         ],
+        olive=[
+            "https://app.roboflow.com/ds/IEZML4ngrB?key=0RFv3Sarca"
+        ]
     )
     url = data2url.get(args.dataset_name, None)
     if url is None:
