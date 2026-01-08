@@ -229,8 +229,10 @@ lvis_rare = [ 'applesauce', 'apricot', 'arctic_(type_of_shoe)', 'armoire', 'armo
         'vulture', 'waffle_iron', 'walrus', 'wardrobe', 'washbasin', 'water_heater', 'water_gun', 'wolf'
     ]
 
+olive_diseases = ['diseases-usdB', 'Anthracnose', 'BlackScale', 'OlivePeacockSpot', 'Psyllid', 'Tuberculosis']
 
 METAINFO = {
+    'olive_diseases': tuple(olive_diseases),
     'lvis': tuple(lvis),
     'lvis_common': tuple(lvis_common),
     'lvis_frequent': tuple(lvis_frequent),

@@ -49,6 +49,8 @@ def sample_memory_dataset(json_file, out_path, memory_length, remove_bad, datase
         cat_ids = coco.getCatIds(catNms=METAINFO['coco_semantic_split_3'])
     elif dataset == 'coco_semantic_split_4':
         cat_ids = coco.getCatIds(catNms=METAINFO['coco_semantic_split_4'])
+    elif dataset == 'olive_diseases':
+        cat_ids = coco.getCatIds(catNms=METAINFO['olive_diseases'])
     else:
         cat_ids = coco.getCatIds(catNms=METAINFO['default_classes'])
 
@@ -227,6 +229,7 @@ if __name__ == "__main__":
     parser.add_argument('--out-path', type=str, required=True, help='Output path for the sampled dataset')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     parser.add_argument('--dataset', type=str, default='coco', help='Dataset to sample from')
+    parser.add_argument('--dataset-json', type=str, default=None, help='Path to dataset json file')
     parser.add_argument('--plot', action='store_true', help='Plot the sampled dataset')
     parser.add_argument('--img-dir', type=str, default=None, help='Image directory')
     args = parser.parse_args()
@@ -241,6 +244,12 @@ if __name__ == "__main__":
             or args.dataset == 'coco_semantic_split_2' or args.dataset == 'coco_semantic_split_3' \
             or args.dataset == 'coco_semantic_split_4':
         all_refs_json_file = "./data/coco/annotations/instances_train2017.json"
+        sample_memory_dataset(all_refs_json_file, args.out_path, args.n_shot, remove_bad=True, dataset=args.dataset)
+    elif args.dataset == 'olive_diseases':
+        if args.dataset_json is not None:
+             all_refs_json_file = args.dataset_json
+        else:
+            all_refs_json_file = "./data/olive_diseases/train/_annotations.coco.json"
         sample_memory_dataset(all_refs_json_file, args.out_path, args.n_shot, remove_bad=True, dataset=args.dataset)
     elif args.dataset == 'lvis' or args.dataset == 'lvis_common' or args.dataset == 'lvis_frequent' or args.dataset == 'lvis_rare' \
             or args.dataset == 'lvis_minival' or args.dataset == 'lvis_minival_common' or args.dataset == 'lvis_minival_frequent' \
