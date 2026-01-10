@@ -614,7 +614,6 @@ class COCORefTestDataset(COCORefTrainDataset):
 
 
     def evaluate(self, results, output_name=""):
-        coco_results = self.coco.loadRes(results)
         if output_name != "":
             # Save results into json file
             folder_name = 'inst_to_segm'
@@ -628,6 +627,12 @@ class COCORefTestDataset(COCORefTrainDataset):
                 os.makedirs(folder_name)
             with open(f"{folder_name}/{file_name}", "w") as f:
                 json.dump(results, f)
+
+        if not results:
+            print("No results to evaluate.")
+            return
+
+        coco_results = self.coco.loadRes(results)
 
 
         if self.class_split == "default_classes":

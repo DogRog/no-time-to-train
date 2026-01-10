@@ -579,15 +579,22 @@ class MemoryBank(nn.Module):
         c = self.feats.shape[-1]
 
         self.feats_avg *= 0.0
+        # Avoid division by zero
+        mask_sum_global = self.masks.sum(dim=(1, 2)).unsqueeze(dim=1)
+        mask_sum_global[mask_sum_global == 0] = 1.0
+
         mem_feats_avg = (
             torch.sum(self.feats * self.masks.unsqueeze(dim=-1), dim=(1, 2))
-            / self.masks.sum(dim=(1, 2)).unsqueeze(dim=1)
+            / mask_sum_global
         )
         self.feats_avg += mem_feats_avg
 
+        mask_sum_ins = self.masks.sum(dim=2).unsqueeze(dim=2)
+        mask_sum_ins[mask_sum_ins == 0] = 1.0
+
         mem_feats_ins_avg = (
             torch.sum(self.feats * self.masks.unsqueeze(dim=-1), dim=2)
-            / self.masks.sum(dim=2).unsqueeze(dim=2)
+            / mask_sum_ins
         )
         self.feats_ins_avg += mem_feats_ins_avg
 
@@ -875,7 +882,12 @@ def compute_sim_global_avg(tar_feat, masks_feat_size_bool, mem_feats_ins_avg, so
         torch.Tensor or tuple: Similarity scores, or (similarity scores, target average features).
     """
     masks = masks_feat_size_bool.to(dtype=tar_feat.dtype)
-    tar_avg_feats = (masks @ tar_feat) / masks.sum(dim=-1, keepdim=True)
+    
+    # Avoid division by zero
+    mask_sum = masks.sum(dim=-1, keepdim=True)
+    mask_sum[mask_sum == 0] = 1.0
+    
+    tar_avg_feats = (masks @ tar_feat) / mask_sum
     tar_avg_feats = F.normalize(tar_avg_feats, p=2, dim=-1)
 
     mem_feats_avg = mem_feats_ins_avg.mean(dim=1)

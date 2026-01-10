@@ -11,6 +11,8 @@ GPUS=1
 mkdir -p $RESULTS_DIR
 FILENAME=olive_${SHOTS}shot_seed${SEED}.pkl
 
+export PYTHONPATH=$PYTHONPATH:.
+
 echo "Sampling few-shot support set..."
 python no_time_to_train/dataset/few_shot_sampling.py \
         --n-shot $SHOTS \
