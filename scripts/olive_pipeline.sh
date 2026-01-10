@@ -1,7 +1,7 @@
 #! /bin/bash
 
 # Run Full Pipeline
-CONFIG=./no_time_to_train/new_exps/olive_fewshot.yaml
+CONFIG=./no_time_to_train/new_exps/olive_fewshot_Sam2L.yaml
 CLASS_SPLIT="olive_diseases"
 RESULTS_DIR=work_dirs/olive_results
 SHOTS=5

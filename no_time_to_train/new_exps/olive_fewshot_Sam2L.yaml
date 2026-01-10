@@ -25,23 +25,39 @@ model:
       memory_bank_cfg:
         enable: True
         category_num: 6
-        length: 5
+        length: 10
     dataset_cfgs:
       fill_memory:
         name: "coco"
         root: "./data/olive_diseases/train2017"
         json_file : "./data/olive_diseases/annotations/instances_train2017.json"
-        memory_pkl: null # Will be provided by script
+        memory_pkl: "./data/olive_diseases/annotations/memory/train2017_allClasses_length10.pkl"
+        class_split: "olive_diseases"
         image_size: 518
-        memory_length: 5
+        memory_length: 10
         context_ratio: 0.2
         norm_img: False
       test:
         name: "coco"
         root: "./data/olive_diseases/val2017"
-        json_file: "./data/olive_diseases/annotations/instances_val2017.json"
+        json_file: "./data/olive_diseases/annotations/instances_val2017.json" 
+        class_split: "olive_diseases"
         image_size: 1024
         norm_img: False
         with_query_points: False
     data_load_cfgs:
       workers: 4
+
+trainer:
+  devices: 1
+  benchmark: true
+  precision: 32
+  callbacks:
+    - class_path: pytorch_lightning.callbacks.TQDMProgressBar
+      init_args:
+        refresh_rate: 10
+  logger:
+    - class_path: pytorch_lightning.loggers.CSVLogger
+      init_args:
+        flush_logs_every_n_steps: 50
+        save_dir: ./work_dirs/test_pl
