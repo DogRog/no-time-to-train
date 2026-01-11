@@ -29,6 +29,7 @@ python run_lightning.py test --config $CONFIG \
                               --model.init_args.dataset_cfgs.fill_memory.memory_pkl ${RESULTS_DIR}/${FILENAME} \
                               --model.init_args.dataset_cfgs.fill_memory.memory_length $SHOTS \
                               --model.init_args.dataset_cfgs.fill_memory.class_split $CLASS_SPLIT \
+                              --model.init_args.model_cfg.dataset_name $CLASS_SPLIT \
                               --trainer.logger.save_dir ${RESULTS_DIR}/ \
                               --trainer.devices $GPUS
 
@@ -36,6 +37,7 @@ echo "Post-processing memory bank..."
 python run_lightning.py test --config $CONFIG \
                               --model.test_mode postprocess_memory \
                               --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
+                              --model.init_args.model_cfg.dataset_name $CLASS_SPLIT \
                               --ckpt_path ${RESULTS_DIR}/memory.ckpt \
                               --out_path ${RESULTS_DIR}/memory_postprocessed.ckpt \
                               --trainer.devices 1
