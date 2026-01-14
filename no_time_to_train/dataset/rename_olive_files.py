@@ -56,6 +56,35 @@ def rename_dataset_files(data_root):
         # Update annotations JSON
         with open(ann_file, 'r') as f:
             data = json.load(f)
+
+        # Remove diseases-usdB category
+        if 'categories' in data:
+            # Find the ID of diseases-usdB
+            cat_to_remove = None
+            for cat in data['categories']:
+                if cat['name'] == 'diseases-usdB':
+                    cat_to_remove = cat
+                    break
+            
+            if cat_to_remove:
+                cat_id = cat_to_remove['id']
+                print(f"Removing category: {cat_to_remove['name']} (ID: {cat_id})")
+                
+                # Remove the category
+                data['categories'] = [c for c in data['categories'] if c['id'] != cat_id]
+                
+                # Remove annotations with this category ID
+                if 'annotations' in data:
+                    original_ann_count = len(data['annotations'])
+                    data['annotations'] = [ann for ann in data['annotations'] if ann['category_id'] != cat_id]
+                    removed_ann_count = original_ann_count - len(data['annotations'])
+                    if removed_ann_count > 0:
+                        print(f"Removed {removed_ann_count} annotations for category {cat_to_remove['name']}")
+                
+                # Update supercategory for other categories
+                for cat in data['categories']:
+                    if cat.get('supercategory') == 'diseases-usdB':
+                        cat['supercategory'] = 'none'
             
         updated_count = 0
         if 'images' in data:

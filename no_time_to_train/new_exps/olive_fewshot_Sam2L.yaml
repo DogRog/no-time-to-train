@@ -24,7 +24,7 @@ model:
       encoder_ckpt_path: null
       memory_bank_cfg:
         enable: True
-        category_num: 6
+        category_num: 5
         length: 10
     dataset_cfgs:
       fill_memory:
