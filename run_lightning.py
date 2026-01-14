@@ -144,7 +144,10 @@ class SAM2RefLightningCLI(LightningCLI):
 
             if not dist.is_initialized() or dist.get_rank() == 0:
                 if scalars_all is not None:
-                    with open("./scalars_all.pkl", "wb") as f:
+                    # Save scalars to log dir if available, else current dir
+                    save_dir = self.trainer.log_dir if self.trainer.log_dir else "."
+                    os.makedirs(save_dir, exist_ok=True)
+                    with open(os.path.join(save_dir, "scalars_all.pkl"), "wb") as f:
                         pickle.dump(scalars_all, f)
 
                 results_unpacked = []

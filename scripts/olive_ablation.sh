@@ -75,7 +75,10 @@ for VERSION in "${VERSIONS[@]}"; do
                                       --model.init_args.model_cfg.dataset_name $CLASS_SPLIT \
                                       --model.init_args.dataset_cfgs.test.class_split $CLASS_SPLIT \
                                       --trainer.logger.save_dir ${RESULTS_DIR}/ \
-                                      --trainer.devices $GPUS
+                                      --trainer.devices $GPUS \
+                                      --seed $SEED \
+                                      --n_shot $SHOTS \
+                                      --export_result ${RESULTS_DIR}/results.json
 
         echo "Cleaning up checkpoints..."
         rm ${RESULTS_DIR}/*.ckpt
