@@ -24,6 +24,7 @@ from no_time_to_train.models.model_utils import (
 )
 
 encoder_predefined_cfgs = {
+    # --- DINOv2 Variants ---
     "dinov2_small": dict(
         img_size=518,
         patch_size=14,
@@ -35,6 +36,18 @@ encoder_predefined_cfgs = {
         ffn_bias=True,
         feat_dim=384,
         hf_model_name="facebook/dinov2-small"
+    ),
+    "dinov2_base": dict(
+        img_size=518,
+        patch_size=14,
+        init_values=1e-5,
+        ffn_layer='mlp',
+        block_chunks=0,
+        qkv_bias=True,
+        proj_bias=True,
+        ffn_bias=True,
+        feat_dim=768,
+        hf_model_name="facebook/dinov2-base"
     ),
     "dinov2_large": dict(
         img_size=518,
@@ -48,6 +61,44 @@ encoder_predefined_cfgs = {
         feat_dim=1024,
         hf_model_name="facebook/dinov2-large"
     ),
+    "dinov2_giant": dict(
+        img_size=518,
+        patch_size=14,
+        init_values=1e-5,
+        ffn_layer='mlp',
+        block_chunks=0,
+        qkv_bias=True,
+        proj_bias=True,
+        ffn_bias=True,
+        feat_dim=1536,
+        hf_model_name="facebook/dinov2-giant"
+    ),
+
+    # --- DINOv3 Variants ---
+    "dinov3_small": dict(
+        img_size=518,
+        patch_size=16,
+        # init_values=1e-5,
+        ffn_layer='mlp',
+        # block_chunks=0,
+        qkv_bias=True,
+        proj_bias=True,
+        ffn_bias=True,
+        feat_dim=384,
+        hf_model_name="facebook/dinov3-vits16-pretrain-lvd1689m"
+    ),
+    "dinov3_base": dict(
+        img_size=518,
+        patch_size=16,
+        # init_values=1e-5,
+        ffn_layer='mlp',
+        # block_chunks=0,
+        qkv_bias=True,
+        proj_bias=True,
+        ffn_bias=True,
+        feat_dim=768,
+        hf_model_name="facebook/dinov3-vitb16-pretrain-lvd1689m"
+    ),
     "dinov3_large": dict(
         img_size=518,
         patch_size=16,
@@ -59,6 +110,18 @@ encoder_predefined_cfgs = {
         ffn_bias=True,
         feat_dim=1024,
         hf_model_name="facebook/dinov3-vitl16-pretrain-lvd1689m"
+    ),
+    "dinov3_huge": dict(
+        img_size=518,
+        patch_size=16,
+        # init_values=1e-5,
+        ffn_layer='mlp',
+        # block_chunks=0,
+        qkv_bias=True,
+        proj_bias=True,
+        ffn_bias=True,
+        feat_dim=1280,
+        hf_model_name="facebook/dinov3-vith16plus-pretrain-lvd1689m"
     )
 }
 

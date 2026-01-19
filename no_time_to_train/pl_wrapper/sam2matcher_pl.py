@@ -1,5 +1,6 @@
 import os
 import copy
+import time
 from typing import Optional
 
 import torch
@@ -174,7 +175,21 @@ class Sam2MatcherLightningModel(LightningModule):
                 assert len(output) == len(batch)
                 self._output_inqueue(output[0])
             elif self.test_mode == "test":
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                elif torch.backends.mps.is_available():
+                    torch.mps.synchronize()
+                start_time = time.time()
+
                 output = self.seg_model(batch)
+
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                elif torch.backends.mps.is_available():
+                    torch.mps.synchronize()
+                end_time = time.time()
+                self.time_queue.append(end_time - start_time)
+
                 assert len(output) == len(batch)
                 self._output_inqueue(output[0])
             elif self.test_mode == "postprocess_memory":
@@ -192,6 +207,7 @@ class Sam2MatcherLightningModel(LightningModule):
         # To store results
         self.output_queue = []
         self.scalars_queue = []
+        self.time_queue = []
 
         # For clarity, each mode is an independent case although some modes may share similar logistic
         if self.test_mode == "fill_memory":

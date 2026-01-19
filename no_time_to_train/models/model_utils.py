@@ -34,7 +34,14 @@ def _resolve_encoder_checkpoint(hf_model_id: str, encoder_defaults: dict) -> str
 
 def build_encoder(encoder_cfg, encoder_ckpt_path, encoder_predefined_cfgs, device):
     encoder_cfg = copy.deepcopy(encoder_cfg)
-    encoder_name = encoder_cfg.pop("name")
+    if isinstance(encoder_cfg, str):
+        encoder_name = encoder_cfg
+        encoder_cfg = {}
+    elif isinstance(encoder_cfg, dict):
+        encoder_name = encoder_cfg.pop("name")
+    else:
+        raise ValueError(f"encoder_cfg must be a string or a dict, got {type(encoder_cfg)}")
+
     encoder_defaults = copy.deepcopy(encoder_predefined_cfgs.get(encoder_name, {}))
 
     if not encoder_defaults:

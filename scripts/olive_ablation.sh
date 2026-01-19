@@ -1,14 +1,15 @@
 #! /bin/bash
 
-# Run Ablation Study for Olive Dataset
+# Run Ablation Study for Model Sizes (DINOv2 & DINOv3) on Olive Dataset
+# Models: dinov2_small, dinov2_base, dinov2_large, dinov2_giant
+#         dinov3_small, dinov3_base, dinov3_large, dinov3_huge
 # Shots: 1, 2, 3, 5, 10
-# Models: dinov2 ("olive_fewshot_Sam2L.yaml"), dinov3 ("olive_fewshot_Sam2L_dinov3.yaml")
 
 # Define the list of shots
 SHOTS_LIST=(1 2 3 5 10)
 
 # Define the model versions
-VERSIONS=("dinov2" "dinov3")
+VERSIONS=("dinov2_small" "dinov2_base" "dinov2_large" "dinov2_giant" "dinov3_small" "dinov3_base" "dinov3_large" "dinov3_huge")
 
 # Common settings
 CLASS_SPLIT="olive_diseases"
@@ -20,11 +21,7 @@ export PYTHONPATH=$PYTHONPATH:.
 
 # Loop over model versions
 for VERSION in "${VERSIONS[@]}"; do
-    if [ "$VERSION" == "dinov2" ]; then
-        CONFIG="./no_time_to_train/new_exps/olive_fewshot_Sam2L.yaml"
-    elif [ "$VERSION" == "dinov3" ]; then
-        CONFIG="./no_time_to_train/new_exps/olive_fewshot_Sam2L_dinov3.yaml"
-    fi
+    CONFIG="./no_time_to_train/new_exps/olive_fewshot_Sam2L.yaml"
 
     # Loop over shots
     for SHOTS in "${SHOTS_LIST[@]}"; do
@@ -50,6 +47,7 @@ for VERSION in "${VERSIONS[@]}"; do
         python run_lightning.py test --config $CONFIG \
                                       --model.test_mode fill_memory \
                                       --out_path ${RESULTS_DIR}/memory.ckpt \
+                                      --model.init_args.model_cfg.encoder_cfg $VERSION \
                                       --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
                                       --model.init_args.dataset_cfgs.fill_memory.memory_pkl ${RESULTS_DIR}/${FILENAME} \
                                       --model.init_args.dataset_cfgs.fill_memory.memory_length $SHOTS \
@@ -61,6 +59,7 @@ for VERSION in "${VERSIONS[@]}"; do
         echo "Post-processing memory bank..."
         python run_lightning.py test --config $CONFIG \
                                       --model.test_mode postprocess_memory \
+                                      --model.init_args.model_cfg.encoder_cfg $VERSION \
                                       --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
                                       --model.init_args.model_cfg.dataset_name $CLASS_SPLIT \
                                       --ckpt_path ${RESULTS_DIR}/memory.ckpt \
@@ -71,6 +70,7 @@ for VERSION in "${VERSIONS[@]}"; do
         python run_lightning.py test --config $CONFIG  \
                                       --ckpt_path ${RESULTS_DIR}/memory_postprocessed.ckpt \
                                       --model.init_args.test_mode test \
+                                      --model.init_args.model_cfg.encoder_cfg $VERSION \
                                       --model.init_args.model_cfg.memory_bank_cfg.length $SHOTS \
                                       --model.init_args.model_cfg.dataset_name $CLASS_SPLIT \
                                       --model.init_args.dataset_cfgs.test.class_split $CLASS_SPLIT \

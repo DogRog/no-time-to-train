@@ -142,7 +142,24 @@ class SAM2RefLightningCLI(LightningCLI):
             else:
                 scalars_all = None
 
+            if hasattr(self.trainer.model, "time_queue") and len(self.trainer.model.time_queue) > 0:
+                times = copy.deepcopy(self.trainer.model.time_queue)
+                times_all = collect_results_cpu(times, size=len(self.trainer.model.eval_dataset))
+            else:
+                times_all = None
+
             if not dist.is_initialized() or dist.get_rank() == 0:
+                if times_all is not None:
+                    import numpy as np
+                    times_np = np.array(times_all)
+                    print(f"\n[Validation] Inference Time Benchmark:")
+                    print(f"  Total images: {len(times_np)}")
+                    print(f"  Total time: {np.sum(times_np):.4f} s")
+                    print(f"  Average time per image: {np.mean(times_np):.4f} s")
+                    print(f"  FPS: {1.0/np.mean(times_np):.2f}")
+                    # print(f"  Min time: {np.min(times_np):.4f} s")
+                    # print(f"  Max time: {np.max(times_np):.4f} s")
+
                 if scalars_all is not None:
                     # Save scalars to log dir if available, else current dir
                     save_dir = self.trainer.log_dir if self.trainer.log_dir else "."
