@@ -13,7 +13,16 @@ from no_time_to_train.dataset.data_utils import is_valid_annotation
 from no_time_to_train.dataset.metainfo import METAINFO
 
 
-def sample_memory_dataset(json_file, out_path, memory_length, remove_bad, dataset='coco', allow_duplicates=False, allow_invalid=False):
+def sample_memory_dataset(
+    json_file,
+    out_path,
+    memory_length,
+    remove_bad,
+    dataset='coco',
+    allow_duplicates=False,
+    allow_invalid=False,
+    prefer_multi_instance=False,
+):
     coco = COCO(json_file)
     if dataset == 'coco':
         cat_ids = coco.getCatIds(catNms=METAINFO['default_classes'])
@@ -69,24 +78,50 @@ def sample_memory_dataset(json_file, out_path, memory_length, remove_bad, datase
     sampled_data_by_cat = OrderedDict()
     for cat_id, cat_data in cat_to_imgs_and_anns.items():
         sampled_data_by_cat[cat_id] = []
-        sampled_img_ids_cat = []
         invalid_annotations = []
-        random.shuffle(cat_data)
-        for i in range(len(cat_data)):
-            img_id, ann_id = cat_data[i]
-            img_info = coco.loadImgs([img_id])[0]
-            if not is_valid_annotation(coco.loadAnns([ann_id])[0], img_info):
-                if allow_invalid:
-                    invalid_annotations.append({'img_id': img_id, 'ann_ids': [ann_id]})
-                continue
-            if img_id in sampled_img_ids_cat:
-                continue
-            sampled_img_ids_cat.append(img_id)
-            sampled_data_by_cat[cat_id].append({'img_id': img_id, 'ann_ids': [ann_id]})
-            if len(sampled_img_ids_cat) >= memory_length:
-                break
-        if len(sampled_img_ids_cat) < memory_length:
-            
+
+        if prefer_multi_instance:
+            img_to_ann_ids = {}
+            for img_id, ann_id in cat_data:
+                img_info = coco.loadImgs([img_id])[0]
+                if not is_valid_annotation(coco.loadAnns([ann_id])[0], img_info):
+                    if allow_invalid:
+                        invalid_annotations.append({'img_id': img_id, 'ann_ids': [ann_id]})
+                    continue
+                if img_id not in img_to_ann_ids:
+                    img_to_ann_ids[img_id] = []
+                img_to_ann_ids[img_id].append(ann_id)
+
+            img_items = list(img_to_ann_ids.items())
+            random.shuffle(img_items)
+            img_items.sort(key=lambda item: len(item[1]), reverse=True)
+
+            for img_id, ann_ids in img_items:
+                for ann_id in ann_ids:
+                    sampled_data_by_cat[cat_id].append({'img_id': img_id, 'ann_ids': [ann_id]})
+                    if len(sampled_data_by_cat[cat_id]) >= memory_length:
+                        break
+                if len(sampled_data_by_cat[cat_id]) >= memory_length:
+                    break
+        else:
+            sampled_img_ids_cat = []
+            random.shuffle(cat_data)
+            for i in range(len(cat_data)):
+                img_id, ann_id = cat_data[i]
+                img_info = coco.loadImgs([img_id])[0]
+                if not is_valid_annotation(coco.loadAnns([ann_id])[0], img_info):
+                    if allow_invalid:
+                        invalid_annotations.append({'img_id': img_id, 'ann_ids': [ann_id]})
+                    continue
+                if img_id in sampled_img_ids_cat:
+                    continue
+                sampled_img_ids_cat.append(img_id)
+                sampled_data_by_cat[cat_id].append({'img_id': img_id, 'ann_ids': [ann_id]})
+                if len(sampled_img_ids_cat) >= memory_length:
+                    break
+
+        if len(sampled_data_by_cat[cat_id]) < memory_length:
+
             if len(sampled_data_by_cat[cat_id]) == 0 and allow_invalid:
                 print("Warning: Class %d has no valid samples. But has %d invalid samples. We allow invalid samples." % (cat_id, len(invalid_annotations)))
                 sampled_data_by_cat[cat_id] = invalid_annotations[:memory_length]
@@ -105,34 +140,42 @@ def sample_memory_dataset(json_file, out_path, memory_length, remove_bad, datase
 
 def visualize_image_mask_pair(image, mask, output_path):
     """
-    Create a side-by-side visualization of image and mask.
+    Create a visualization of image with mask overlay.
     Args:
         image: RGB image array
         mask: Binary mask array
         output_path: Path to save the visualization
     """
-    # Ensure mask is binary and convert to uint8
-    mask = (mask > 0).astype(np.uint8) * 255
+    # Ensure mask is binary
+    mask_bool = (mask > 0)
     
-    # Convert single channel mask to 3 channels
-    mask_rgb = np.stack([mask, mask, mask], axis=2)
+    # Create valid overlay for the mask
+    # We will use a semi-transparent green color for the mask
+    vis_image = image.copy()
     
-    # Ensure image and mask have same height
-    h1, w1 = image.shape[:2]
-    h2, w2 = mask_rgb.shape[:2]
-    target_height = max(h1, h2)
+    # Designate a color (green)
+    color = np.array([0, 255, 0], dtype=np.uint8) 
     
-    # Resize if necessary
-    if h1 != target_height:
-        image = cv2.resize(image, (int(w1 * target_height / h1), target_height))
-    if h2 != target_height:
-        mask_rgb = cv2.resize(mask_rgb, (int(w2 * target_height / h2), target_height))
+    alpha = 0.5
     
-    # Concatenate horizontally
-    visualization = np.concatenate([image, mask_rgb], axis=1)
+    # Apply color to masked area
+    # Ensure shapes match
+    if image.shape[:2] != mask.shape[:2]:
+         mask_bool = cv2.resize(mask_bool.astype(np.uint8), (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST).astype(bool)
+
+    for c in range(3):
+        vis_image[:, :, c] = np.where(mask_bool,
+                                      vis_image[:, :, c] * (1 - alpha) + color[c] * alpha,
+                                      vis_image[:, :, c])
+    
+    # Draw contours for better visibility
+    contours, _ = cv2.findContours(mask_bool.astype(np.uint8) * 255, 
+                                 cv2.RETR_EXTERNAL, 
+                                 cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(vis_image, contours, -1, color.tolist(), 2)
     
     # Save the visualization
-    cv2.imwrite(output_path, cv2.cvtColor(visualization, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(output_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
 
 def visualize_all_annotations(image, annotations, coco, output_path, seed):
     """
@@ -231,6 +274,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default='coco', help='Dataset to sample from')
     parser.add_argument('--dataset-json', type=str, default=None, help='Path to dataset json file')
     parser.add_argument('--plot', action='store_true', help='Plot the sampled dataset')
+    parser.add_argument('--prefer-multi-instance', action='store_true', help='Prefer multiple instances from the same image when sampling shots')
     parser.add_argument('--img-dir', type=str, default=None, help='Image directory')
     args = parser.parse_args()
     
@@ -244,21 +288,51 @@ if __name__ == "__main__":
             or args.dataset == 'coco_semantic_split_2' or args.dataset == 'coco_semantic_split_3' \
             or args.dataset == 'coco_semantic_split_4':
         all_refs_json_file = "./data/coco/annotations/instances_train2017.json"
-        sample_memory_dataset(all_refs_json_file, args.out_path, args.n_shot, remove_bad=True, dataset=args.dataset)
+        sample_memory_dataset(
+            all_refs_json_file,
+            args.out_path,
+            args.n_shot,
+            remove_bad=True,
+            dataset=args.dataset,
+            prefer_multi_instance=args.prefer_multi_instance,
+        )
     elif args.dataset == 'olive_diseases':
         if args.dataset_json is not None:
              all_refs_json_file = args.dataset_json
         else:
             all_refs_json_file = "./data/olive_diseases/train/_annotations.coco.json"
-        sample_memory_dataset(all_refs_json_file, args.out_path, args.n_shot, remove_bad=True, dataset=args.dataset)
+        sample_memory_dataset(
+            all_refs_json_file,
+            args.out_path,
+            args.n_shot,
+            remove_bad=True,
+            dataset=args.dataset,
+            prefer_multi_instance=args.prefer_multi_instance,
+        )
     elif args.dataset == 'lvis' or args.dataset == 'lvis_common' or args.dataset == 'lvis_frequent' or args.dataset == 'lvis_rare' \
             or args.dataset == 'lvis_minival' or args.dataset == 'lvis_minival_common' or args.dataset == 'lvis_minival_frequent' \
             or args.dataset == 'lvis_minival_rare':
         all_refs_json_file = "./data/lvis/lvis_v1_train.json"
-        sample_memory_dataset(all_refs_json_file, args.out_path, args.n_shot, remove_bad=False, dataset=args.dataset, allow_duplicates=True, allow_invalid=True)
+        sample_memory_dataset(
+            all_refs_json_file,
+            args.out_path,
+            args.n_shot,
+            remove_bad=False,
+            dataset=args.dataset,
+            allow_duplicates=True,
+            allow_invalid=True,
+            prefer_multi_instance=args.prefer_multi_instance,
+        )
     elif args.dataset == 'pascal_voc_split_1' or args.dataset == 'pascal_voc_split_2' or args.dataset == 'pascal_voc_split_3':
         all_refs_json_file = "./data/pascal_voc/annotations/voc0712_trainval_with_segm.json"
-        sample_memory_dataset(all_refs_json_file, args.out_path, args.n_shot, remove_bad=True, dataset=args.dataset)
+        sample_memory_dataset(
+            all_refs_json_file,
+            args.out_path,
+            args.n_shot,
+            remove_bad=True,
+            dataset=args.dataset,
+            prefer_multi_instance=args.prefer_multi_instance,
+        )
     else:
         raise ValueError("Invalid dataset: %s" % args.dataset)
 

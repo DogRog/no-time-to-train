@@ -43,3 +43,5 @@ notebooks/videos/*
 uv.lock
 test.py
 test.ipynb
+
+sam3_olive_results.json
