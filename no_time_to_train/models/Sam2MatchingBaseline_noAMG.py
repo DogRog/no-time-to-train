@@ -76,7 +76,7 @@ encoder_predefined_cfgs = {
 
     # --- DINOv3 Variants ---
     "dinov3_small": dict(
-        img_size=518,
+        img_size=592, # 37x16=592, to better align with SAM2's 1024 input size and avoid excessive upsampling
         patch_size=16,
         # init_values=1e-5,
         ffn_layer='mlp',
@@ -88,7 +88,7 @@ encoder_predefined_cfgs = {
         hf_model_name="facebook/dinov3-vits16-pretrain-lvd1689m"
     ),
     "dinov3_base": dict(
-        img_size=518,
+        img_size=592,
         patch_size=16,
         # init_values=1e-5,
         ffn_layer='mlp',
@@ -100,7 +100,7 @@ encoder_predefined_cfgs = {
         hf_model_name="facebook/dinov3-vitb16-pretrain-lvd1689m"
     ),
     "dinov3_large": dict(
-        img_size=518,
+        img_size=592,
         patch_size=16,
         # init_values=1e-5,
         ffn_layer='mlp',
@@ -112,7 +112,7 @@ encoder_predefined_cfgs = {
         hf_model_name="facebook/dinov3-vitl16-pretrain-lvd1689m"
     ),
     "dinov3_huge": dict(
-        img_size=518,
+        img_size=592,
         patch_size=16,
         # init_values=1e-5,
         ffn_layer='mlp',

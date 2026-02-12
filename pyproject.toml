@@ -55,6 +55,7 @@ dependencies = [
     "tidecv==1.0.1",
     "torch==2.4.1",
     "torchvision==0.19.1",
+    "av>=16.1.0",
 ]
 
 [project.optional-dependencies]
