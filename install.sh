@@ -17,6 +17,9 @@ fi
 echo "Installing package and dependencies..."
 pip install -e .
 
+pip uninstall -y flash-attn
+pip install flash-attn --no-build-isolation
+
 # Download SAM checkpoint
 echo "Downloading SAM checkpoint..."
 mkdir -p checkpoints
