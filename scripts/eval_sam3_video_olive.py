@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import random
 import sys
@@ -8,6 +9,9 @@ from collections import defaultdict
 
 import numpy as np
 import torch
+import cv2
+from pycocotools import mask as mask_utils
+from pycocotools.cocoeval import COCOeval
 from tqdm import tqdm
 from transformers import Sam3TrackerVideoModel, Sam3TrackerVideoProcessor
 
@@ -24,6 +28,9 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--device", type=str, default="cuda", help="Device to run on")
     parser.add_argument("--output_dir", type=str, default="work_dirs/sam3_video_results", help="Output directory")
+    parser.add_argument("--prediction_file", type=str, default="sam3_predictions.json", help="Prediction filename inside output_dir")
+    parser.add_argument("--score", type=float, default=1.0, help="Confidence score assigned to SAM3 predictions")
+    parser.add_argument("--evaluate_coco", action="store_true", help="Run COCO bbox/segm evaluation after exporting predictions")
     return parser.parse_args()
 
 def calculate_iou(pred_mask, gt_mask):
@@ -34,14 +41,28 @@ def calculate_iou(pred_mask, gt_mask):
         return 1.0 if intersection == 0 else 0.0
     return intersection / union
 
+
+def mask_to_bbox_xywh(mask):
+    ys, xs = np.where(mask > 0)
+    if len(xs) == 0 or len(ys) == 0:
+        return None
+    x1, x2 = int(xs.min()), int(xs.max())
+    y1, y2 = int(ys.min()), int(ys.max())
+    return [float(x1), float(y1), float(x2 - x1 + 1), float(y2 - y1 + 1)]
+
 def main():
     args = parse_args()
+    os.makedirs(args.output_dir, exist_ok=True)
     
     # Reproducibility
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    
+
+    using_cuda = args.device.startswith("cuda") and torch.cuda.is_available()
+    if using_cuda:
+        torch.cuda.reset_peak_memory_stats()
+
     # 1. Setup Model
     print(f"Loading SAM3 model on {args.device}...")
     dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
@@ -129,6 +150,9 @@ def main():
 
     # 4. Evaluation Loop
     results = defaultdict(list)
+    predictions = []
+    total_query_time_sec = 0.0
+    processed_queries = 0
     
     # Target size for SAM3
     target_h, target_w = 1024, 1024
@@ -138,6 +162,7 @@ def main():
          target_w = size_conf.get("width", 1024)
 
     for query_idx in tqdm(range(len(query_set)), desc="Evaluating Queries"):
+        query_start_t = time.perf_counter()
         query_item = query_set[query_idx]
         
         # Get query image
@@ -274,6 +299,41 @@ def main():
                 real_cat_id = support_set.cat_inds_to_ids[cat_ind]
                 results[real_cat_id].append(iou)
 
+                pred_mask_u8 = pred_mask.astype(np.uint8)
+                if pred_mask_u8.sum() == 0:
+                    continue
+
+                ori_h = int(query_item['target_img_info']['ori_height'])
+                ori_w = int(query_item['target_img_info']['ori_width'])
+                pred_mask_resized = cv2.resize(
+                    pred_mask_u8,
+                    (ori_w, ori_h),
+                    interpolation=cv2.INTER_NEAREST,
+                ).astype(np.uint8)
+
+                if pred_mask_resized.sum() == 0:
+                    continue
+
+                bbox_xywh = mask_to_bbox_xywh(pred_mask_resized)
+                if bbox_xywh is None:
+                    continue
+
+                segmentation = mask_utils.encode(np.asfortranarray(pred_mask_resized))
+                segmentation['counts'] = segmentation['counts'].decode('utf-8')
+
+                predictions.append(
+                    {
+                        'image_id': int(query_item['target_img_info']['id']),
+                        'category_id': int(real_cat_id),
+                        'bbox': bbox_xywh,
+                        'score': float(args.score),
+                        'segmentation': segmentation,
+                    }
+                )
+
+        total_query_time_sec += max(0.0, time.perf_counter() - query_start_t)
+        processed_queries += 1
+
     # 5. Report
     print("\n--- Evaluation Results ---")
     all_ious = []
@@ -292,8 +352,55 @@ def main():
         print(f"{cat_id:<10} | {cat_name:<20} | {mean_iou:.4f}")
     
     print("-" * 46)
-    print(f"Overall mIoU: {sum(all_ious)/len(all_ious):.4f}")
+    overall_miou = (sum(all_ious) / len(all_ious)) if len(all_ious) > 0 else 0.0
+    print(f"Overall mIoU: {overall_miou:.4f}")
 
+    pred_path = os.path.join(args.output_dir, args.prediction_file)
+    with open(pred_path, "w") as f:
+        json.dump(predictions, f)
+    print(f"Saved {len(predictions)} predictions to {pred_path}")
+
+    fps = (processed_queries / total_query_time_sec) if total_query_time_sec > 0 else 0.0
+    peak_vram_allocated_mib = None
+    peak_vram_reserved_mib = None
+    if using_cuda:
+        peak_vram_allocated_mib = float(torch.cuda.max_memory_allocated() / (1024 ** 2))
+        peak_vram_reserved_mib = float(torch.cuda.max_memory_reserved() / (1024 ** 2))
+
+    runtime_summary = {
+        "model": "sam3",
+        "shots": int(args.shots),
+        "seed": int(args.seed),
+        "num_queries": int(processed_queries),
+        "total_inference_time_sec": float(total_query_time_sec),
+        "fps": float(fps),
+        "peak_vram_mib": peak_vram_reserved_mib,
+        "peak_vram_allocated_mib": peak_vram_allocated_mib,
+        "peak_vram_reserved_mib": peak_vram_reserved_mib,
+    }
+    runtime_path = os.path.join(args.output_dir, "sam3_runtime.json")
+    with open(runtime_path, "w") as f:
+        json.dump(runtime_summary, f, indent=2)
+    print(f"Saved SAM3 runtime summary to {runtime_path}")
+    print(f"SAM3 FPS: {fps:.3f}")
+    if peak_vram_reserved_mib is not None:
+        print(f"SAM3 peak VRAM (reserved MiB): {peak_vram_reserved_mib:.2f}")
+
+    if args.evaluate_coco and len(predictions) > 0:
+        coco_results = query_set.coco.loadRes(predictions)
+
+        print("\n--- COCO Evaluation (SAM3 Predictions) ---")
+        coco_eval_bbox = COCOeval(query_set.coco, coco_results, "bbox")
+        coco_eval_bbox.params.imgIds = query_set.img_ids
+        coco_eval_bbox.evaluate()
+        coco_eval_bbox.accumulate()
+        coco_eval_bbox.summarize()
+
+        coco_eval_segm = COCOeval(query_set.coco, coco_results, "segm")
+        coco_eval_segm.params.imgIds = query_set.img_ids
+        coco_eval_segm.evaluate()
+        coco_eval_segm.accumulate()
+        coco_eval_segm.summarize()
 
 if __name__ == "__main__":
     main()

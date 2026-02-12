@@ -46,7 +46,7 @@ model:
         norm_img: False
         with_query_points: False
     data_load_cfgs:
-      workers: 4
+      workers: 0
 
 trainer:
   devices: 1
