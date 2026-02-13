@@ -11,7 +11,7 @@ fi
 
 SEED=${SEED:-42}
 DEVICE=${DEVICE:-cuda}
-RUN_VERSION=${RUN_VERSION:-dinov2_large}
+SAM3_RUN_PREFIX=${SAM3_RUN_PREFIX:-sam3}
 OUTPUT_ROOT=${OUTPUT_ROOT:-work_dirs/olive_nttt_sam3_eval}
 PREDICTION_NAME=${PREDICTION_NAME:-sam3_predictions.json}
 
@@ -24,14 +24,13 @@ else
 fi
 
 for SHOTS in "${SHOTS_LIST[@]}"; do
-    # NOTE: RUN_VERSION is only used to align SAM3 outputs with NTTT folder names.
-    RUN_DIR=${OUTPUT_ROOT}/${RUN_VERSION}_${SHOTS}shot_seed${SEED}
+    RUN_DIR=${OUTPUT_ROOT}/${SAM3_RUN_PREFIX}_${SHOTS}shot_seed${SEED}
     mkdir -p "${RUN_DIR}"
 
     echo "========================================================"
     echo "Running SAM3 evaluation"
     echo "Shots: ${SHOTS} | Seed: ${SEED} | Device: ${DEVICE}"
-    echo "Run folder key (for NTTT alignment): ${RUN_VERSION}"
+    echo "Run folder key: ${SAM3_RUN_PREFIX}"
     echo "Output dir: ${RUN_DIR}"
     echo "========================================================"
 

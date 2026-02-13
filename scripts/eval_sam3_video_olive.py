@@ -29,7 +29,12 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cuda", help="Device to run on")
     parser.add_argument("--output_dir", type=str, default="work_dirs/sam3_video_results", help="Output directory")
     parser.add_argument("--prediction_file", type=str, default="sam3_predictions.json", help="Prediction filename inside output_dir")
-    parser.add_argument("--score", type=float, default=1.0, help="Confidence score assigned to SAM3 predictions")
+    parser.add_argument(
+        "--score",
+        type=float,
+        default=None,
+        help="Optional constant confidence override. If unset, score is computed from SAM3 mask logits.",
+    )
     parser.add_argument("--evaluate_coco", action="store_true", help="Run COCO bbox/segm evaluation after exporting predictions")
     return parser.parse_args()
 
@@ -256,6 +261,7 @@ def main():
             # Usually yes.
             
             pred_masks_np = video_res_masks.cpu().numpy() # (N_obj, 1, H, W)
+            pred_logits_np = masks_logits.detach().float().cpu().numpy() # (N_obj, 1, H, W)
             
             # We iterate over unique categories present in support set
             # all_support_metadata maps frames to categories.
@@ -282,8 +288,10 @@ def main():
                 # Assuming pred_masks_np[cat_ind] corresponds to obj_id = cat_ind + 1
                 if cat_ind < pred_masks_np.shape[0]:
                     pred_mask = pred_masks_np[cat_ind, 0] > 0
+                    pred_logit = np.asarray(pred_logits_np[cat_ind]).squeeze()
                 else:
                     pred_mask = np.zeros((1024, 1024), dtype=bool) # Falback
+                    pred_logit = np.zeros((1024, 1024), dtype=np.float32)
                 
                 # Retrieve GT
                 if cat_ind in gt_anns:
@@ -318,6 +326,18 @@ def main():
                 if bbox_xywh is None:
                     continue
 
+                if args.score is not None:
+                    pred_score = float(args.score)
+                else:
+                    pred_prob = 1.0 / (1.0 + np.exp(-np.clip(pred_logit, -30.0, 30.0)))
+                    if pred_prob.shape != pred_mask.shape:
+                        pred_prob = cv2.resize(
+                            pred_prob.astype(np.float32),
+                            (pred_mask.shape[1], pred_mask.shape[0]),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                    pred_score = float(pred_prob[pred_mask].mean())
+
                 segmentation = mask_utils.encode(np.asfortranarray(pred_mask_resized))
                 segmentation['counts'] = segmentation['counts'].decode('utf-8')
 
@@ -326,7 +346,7 @@ def main():
                         'image_id': int(query_item['target_img_info']['id']),
                         'category_id': int(real_cat_id),
                         'bbox': bbox_xywh,
-                        'score': float(args.score),
+                        'score': pred_score,
                         'segmentation': segmentation,
                     }
                 )
